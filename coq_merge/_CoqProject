@@ -1,0 +1,13 @@
+-R . Top
+
+def_typ.v
+infra.v
+decidability.v
+unfolding.v
+lub.v
+disjoint.v
+def_exp.v
+typinginfra.v
+typereduce.v
+preservation.v
+progress.v
