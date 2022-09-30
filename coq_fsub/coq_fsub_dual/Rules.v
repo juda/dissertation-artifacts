@@ -3,13 +3,15 @@ Require Export String.
 
 Inductive typ : Set :=
   | typ_nat : typ
-  | typ_top : typ
+  | typ_bot : typ
   | typ_bvar : nat -> typ
   | typ_fvar : var -> typ
   | typ_arrow : typ -> typ -> typ
   | typ_all : typ -> typ -> typ
   | typ_mu : typ -> typ
-  | typ_label : var -> typ -> typ                  
+  | typ_label : var -> typ -> typ     
+  | typ_rcd_nil : typ
+  | typ_rcd_cons : var -> typ -> typ -> typ            
 .
 
 Coercion typ_bvar : nat >-> typ.
@@ -25,6 +27,9 @@ Inductive exp : Set :=
   | exp_nat : exp
   | exp_unfold : typ -> exp -> exp
   | exp_fold : typ -> exp -> exp
+  | exp_rcd_nil : exp
+  | exp_rcd_cons : var -> exp -> exp -> exp
+  | exp_rcd_proj : exp -> var -> exp
 .
 
 Coercion exp_bvar : nat >-> exp.
@@ -33,21 +38,30 @@ Coercion exp_fvar : atom >-> exp.
 Fixpoint open_tt_rec (K : nat) (U : typ) (T : typ) {struct T} : typ :=
   match T with
   | typ_nat         => typ_nat      
-  | typ_top         => typ_top
+  | typ_bot         => typ_bot
   | typ_bvar J      => if K === J then U else (typ_bvar J)
   | typ_fvar X      => typ_fvar X 
   | typ_arrow T1 T2 => typ_arrow (open_tt_rec K U T1) (open_tt_rec K U T2)
   | typ_all T1 T2 => typ_all (open_tt_rec K U T1) (open_tt_rec (S K) U T2)
   | typ_mu T        => typ_mu (open_tt_rec (S K) U T)
-  | typ_label l T        => typ_label l (open_tt_rec K U T)                            
+  | typ_label l T        => typ_label l (open_tt_rec K U T)
+  | typ_rcd_nil     => typ_rcd_nil
+  | typ_rcd_cons i T1 T2  => typ_rcd_cons i (open_tt_rec K U T1) (open_tt_rec K U T2)
   end.
 
 
 Definition open_tt T U := open_tt_rec 0 U T.
 
+Inductive rt_type : typ -> Prop :=
+  | rt_type_rcd_nil :
+      rt_type typ_rcd_nil
+  | rt_type_rcd_cons : forall i T1 T2,
+      rt_type (typ_rcd_cons i T1 T2)
+.
+
 Inductive type : typ -> Prop :=
-  | type_top :
-      type typ_top
+  | type_bot :
+      type typ_bot
   | type_nat :
       type typ_nat
   | type_var : forall X,
@@ -66,25 +80,33 @@ Inductive type : typ -> Prop :=
   | type_label: forall l A,
       type A ->
       type (typ_label l A)
-.
+  | type_rcd_nil :
+      type typ_rcd_nil
+  | type_rcd_cons : forall i T1 T2,
+      type T1 ->
+      type T2 ->
+      rt_type T2 ->
+      type (typ_rcd_cons i T1 T2).
 
 
 
 Fixpoint subst_tt (Z : atom) (U : typ) (T : typ) {struct T} : typ :=
   match T with
-  | typ_top => typ_top
+  | typ_bot => typ_bot
   | typ_nat => typ_nat
   | typ_bvar J => typ_bvar J
   | typ_fvar X => if X == Z then U else (typ_fvar X)
   | typ_arrow T1 T2 => typ_arrow (subst_tt Z U T1) (subst_tt Z U T2)
   | typ_mu T => typ_mu (subst_tt Z U T)
   | typ_label l T => typ_label l (subst_tt Z U T)                     
-  | typ_all T1 T2 => typ_all (subst_tt Z U T1) (subst_tt Z U T2)                    
+  | typ_all T1 T2 => typ_all (subst_tt Z U T1) (subst_tt Z U T2)
+  | typ_rcd_nil     => typ_rcd_nil
+  | typ_rcd_cons i T1 T2  => typ_rcd_cons i (subst_tt Z U T1) (subst_tt Z U T2)
   end.
 
 Fixpoint fv_tt (T : typ) {struct T} : atoms :=
   match T with
-  | typ_top => {}
+  | typ_bot => {}
   | typ_nat => {}
   | typ_bvar J => {}
   | typ_fvar X => {{ X }}
@@ -92,6 +114,8 @@ Fixpoint fv_tt (T : typ) {struct T} : atoms :=
   | typ_all T1 T2 => (fv_tt T1) `union` (fv_tt T2)                                
   | typ_mu T => (fv_tt T)
   | typ_label l T => (fv_tt T)
+  | typ_rcd_nil     => {}
+  | typ_rcd_cons i T1 T2  => fv_tt T1 \u fv_tt T2
   end.
 
 Inductive binding : Set :=
@@ -101,8 +125,27 @@ Inductive binding : Set :=
 Definition env := list (atom * binding).
 Notation empty := (@nil (atom * binding)).
 
+Fixpoint Tlookup (i':var) (Tr:typ) : option typ :=
+  match Tr with
+  | (typ_rcd_cons i T1 T2) =>
+      if i == i' then Some T1 else Tlookup i' T2
+  | _ => None
+  end.
+
+Fixpoint collectLabel (T : typ) : atoms :=
+  match T with
+  | (typ_rcd_cons i T1 T2) => {{i}} \u collectLabel T2
+  | _ => {}
+  end.
+
+Fixpoint collectLabele (e: exp) : atoms :=
+  match e with
+  | (exp_rcd_cons i e1 e2) => {{i}} \u collectLabele e2
+  | _ => {}
+  end.
+
 Inductive WF : env -> typ -> Prop :=
-| WF_top : forall E, WF E typ_top
+| WF_bot : forall E, WF E typ_bot
 | WF_nat : forall E, WF E typ_nat
 | WF_var: forall U E (X : atom),
       binds X (bind_sub U) E ->
@@ -118,18 +161,26 @@ Inductive WF : env -> typ -> Prop :=
       WF E (typ_all T1 T2)
 | WF_rec : forall L E A,
       (forall X, X \notin L -> 
-                 WF (X ~ bind_sub typ_top ++ E) (open_tt A X)) ->
+                 WF (X ~ bind_sub typ_bot ++ E) (open_tt A X)) ->
       (forall X, X \notin L -> 
-                 WF (X ~ bind_sub typ_top ++ E) (open_tt A (typ_label X (open_tt A X)))) ->
+                 WF (X ~ bind_sub typ_bot ++ E) (open_tt A (typ_label X (open_tt A X)))) ->
       WF E (typ_mu A)
 | WF_label: forall E A X,
     WF E A ->
     WF E (typ_label X A)
+| WF_rcd_nil : forall E,
+      WF E typ_rcd_nil
+| WF_rcd_cons : forall E i T1 T2,
+      WF E T1 ->
+      WF E T2 ->
+      rt_type T2 ->
+      i \notin (collectLabel T2) ->
+      WF E (typ_rcd_cons i T1 T2)
 .
 
 Fixpoint fl_tt (T : typ) {struct T} : atoms :=
   match T with
-  | typ_top => {}
+  | typ_bot => {}
   | typ_nat => {}
   | typ_bvar J => {}
   | typ_fvar X => {}
@@ -137,6 +188,8 @@ Fixpoint fl_tt (T : typ) {struct T} : atoms :=
   | typ_mu T => (fl_tt T)
   | typ_label X T => {{ X }} `union` fl_tt T
   | typ_all T1 T2 => (fl_tt T1) \u (fl_tt T2)
+  | typ_rcd_nil     => {}
+  | typ_rcd_cons i T1 T2  => {{i}} \u fl_tt T1 \u fl_tt T2
   end.
 
 Fixpoint fv_env (E:env) : atoms :=
@@ -175,37 +228,46 @@ Inductive sub : env -> typ -> typ -> Prop :=
     wf_env E ->
     WF E (typ_fvar X) ->
     sub E (typ_fvar X) (typ_fvar X)
-| sa_top : forall E A,
+| sa_bot : forall E A,
     wf_env E ->
     WF E A -> 
-    sub E A typ_top
+    sub E typ_bot A
 | sa_trans_tvar : forall U E T X,
       binds X (bind_sub U) E ->
-      sub E U T ->
-      sub E (typ_fvar X) T
+      sub E T U ->
+      sub E T (typ_fvar X)
 | sa_arrow: forall E A1 A2 B1 B2,
     sub E B1 A1 ->
     sub E A2 B2 ->
     sub E (typ_arrow A1 A2) (typ_arrow B1 B2)
-| sa_all : forall L E S T1 T2,
-    WF E S ->
+| sa_all : forall L E S1 S2 T1 T2,
+    sub E S1 S2 ->
+    sub E S2 S1 ->
       (forall X : atom, X `notin` L ->
-          sub (X ~ bind_sub S ++ E) (open_tt T1 X) (open_tt T2 X)) ->
-      sub E (typ_all S T1) (typ_all S T2)
+          sub (X ~ bind_sub S2 ++ E) (open_tt T1 X) (open_tt T2 X)) ->
+      sub E (typ_all S1 T1) (typ_all S2 T2)
 | sa_rec: forall L A1 A2 E,
     (forall X,
         X \notin L ->
-        WF (X ~ bind_sub typ_top ++ E) (open_tt A1 X)) ->
+        WF (X ~ bind_sub typ_bot ++ E) (open_tt A1 X)) ->
     (forall X,
         X \notin L ->
-        WF (X ~ bind_sub typ_top ++ E) (open_tt A2 X)) ->
+        WF (X ~ bind_sub typ_bot ++ E) (open_tt A2 X)) ->
     (forall X,
         X \notin L ->
-        sub (X ~ bind_sub typ_top ++ E) (open_tt A1 (typ_label X (open_tt A1 X))) (open_tt A2 (typ_label X (open_tt A2 X)))) ->
+        sub (X ~ bind_sub typ_bot ++ E) (open_tt A1 (typ_label X (open_tt A1 X))) (open_tt A2 (typ_label X (open_tt A2 X)))) ->
     sub E (typ_mu A1) (typ_mu A2)
 | sa_label: forall E X A B,
     sub E A B ->
     sub E (typ_label X A) (typ_label X B)
+| sa_rcd: forall A1 A2 E,
+    wf_env E ->
+    rt_type A1 ->
+    rt_type A2 ->
+    collectLabel A2 [<=] collectLabel A1 ->
+    WF E A1 -> WF E A2 ->
+    (forall i t1 t2, Tlookup i A1 = Some t1 ->  Tlookup i A2 = Some t2 -> sub E t1 t2) ->
+    sub E A1 A2
 .
 
 
@@ -226,6 +288,9 @@ Fixpoint open_te_rec (K : nat) (U : typ) (e : exp) {struct e} : exp :=
   | exp_tapp e1 V => exp_tapp (open_te_rec K U e1) (open_tt_rec K U V)
   | exp_unfold V e => exp_unfold (open_tt_rec K U V) (open_te_rec K U e)
   | exp_fold V e => exp_fold (open_tt_rec K U V) (open_te_rec K U e)
+  | exp_rcd_nil => exp_rcd_nil
+  | exp_rcd_cons i e1 e2 => exp_rcd_cons i (open_te_rec K U e1) (open_te_rec K U e2)
+  | exp_rcd_proj e1 i => exp_rcd_proj (open_te_rec K U e1) i     
   end.
 
 Fixpoint open_ee_rec (k : nat) (f : exp) (e : exp)  {struct e} : exp :=
@@ -238,11 +303,21 @@ Fixpoint open_ee_rec (k : nat) (f : exp) (e : exp)  {struct e} : exp :=
   | exp_tabs V e1 => exp_tabs V (open_ee_rec k f e1)
   | exp_tapp e1 V => exp_tapp (open_ee_rec k f e1) V
   | exp_unfold V e => exp_unfold V (open_ee_rec k f e)
-  | exp_fold V e => exp_fold V (open_ee_rec k f e)                            
+  | exp_fold V e => exp_fold V (open_ee_rec k f e)
+  | exp_rcd_nil => exp_rcd_nil
+  | exp_rcd_cons i e1 e2 => exp_rcd_cons i (open_ee_rec k f e1) (open_ee_rec k f e2)
+  | exp_rcd_proj e1 i => exp_rcd_proj (open_ee_rec k f e1) i   
   end.
 
 Definition open_te e U := open_te_rec 0 U e.
 Definition open_ee e1 e2 := open_ee_rec 0 e2 e1.
+
+Inductive rt_expr : exp -> Prop :=
+  | rt_expr_rcd_nil :
+      rt_expr exp_rcd_nil
+  | rt_expr_rcd_cons : forall i e1 e2,
+      rt_expr (exp_rcd_cons i e1 e2)
+.
 
 Inductive expr : exp -> Prop :=
   | expr_nat : expr exp_nat
@@ -272,11 +347,29 @@ Inductive expr : exp -> Prop :=
      type T ->
      expr e ->
      expr (exp_fold T e)
+  | expr_rcd_nil :
+     expr exp_rcd_nil
+  | expr_rcd_cons : forall i e1 e2,
+     expr e1 ->
+     expr e2 ->
+     rt_expr e2 ->
+     expr (exp_rcd_cons i e1 e2)
+  | expr_rcd_proj : forall i e,
+     expr e ->
+     expr (exp_rcd_proj e i)
 .
 
 Definition body_e (e : exp) :=
   exists L, forall x : atom, x `notin` L -> expr (open_ee e x).
 
+
+Fixpoint tlookup (i':var) (Er:exp) : option exp :=
+  match Er with
+  | (exp_rcd_cons i e1 e2) =>
+      if i == i' then Some e1 else tlookup i' e2
+  | _ => None
+  end.
+  
 
 Inductive typing : env -> exp -> typ -> Prop :=
   | typing_nat: forall G,
@@ -300,19 +393,33 @@ Inductive typing : env -> exp -> typ -> Prop :=
       typing E (exp_tabs V e1) (typ_all V T1)
   | typing_tapp : forall T1 E e1 T T2,
       typing E e1 (typ_all T1 T2) ->
-      sub E T T1 ->
+      sub E T1 T ->
       typing E (exp_tapp e1 T) (open_tt T2 T)
-  | typing_fold : forall G A e ,
-     typing G e  (open_tt A  (typ_mu A))    ->
-     WF G (typ_mu A) ->
-     typing G (exp_fold (typ_mu A) e) (typ_mu A)
- | typing_unfold : forall G T e,
-     typing G e (typ_mu T) ->
-     typing G (exp_unfold (typ_mu T) e)  (open_tt T  (typ_mu T))
+  | typing_fold : forall G A T e ,
+      sub G (typ_mu A) T ->
+      typing G e (open_tt A T)  ->
+      typing G (exp_fold T e) T
+  | typing_unfold : forall G A T e,
+     typing G e A -> sub G A (typ_mu T) ->
+     typing G (exp_unfold A e)  (open_tt T A)
   | typing_sub : forall S E e T,
       typing E e S ->
       sub E S T ->
       typing E e T
+  | typing_proj : forall G e T i Ti,
+      typing G e T ->
+      Tlookup i T = Some Ti ->
+      typing G (exp_rcd_proj e i) Ti
+  | typing_rcd_nil : forall G,
+      wf_env G ->
+      typing G exp_rcd_nil typ_rcd_nil
+  | typing_rcd_cons: forall G e1 e2 T1 T2 i,
+      typing G e1 T1 ->
+      typing G e2 T2 ->
+      rt_type T2 ->
+      rt_expr e2 ->
+      i \notin (collectLabele e2) ->
+      typing G (exp_rcd_cons i e1 e2) (typ_rcd_cons i T1 T2)
 .
 
 Inductive value : exp -> Prop :=
@@ -328,6 +435,13 @@ Inductive value : exp -> Prop :=
       type T ->
       value e ->
       value (exp_fold T e)
+  | value_rcd_nil:
+      value exp_rcd_nil
+ | value_rcd_cons : forall i e1 e2,
+      value e1 ->
+      value e2 ->
+      rt_expr e2 ->
+      value (exp_rcd_cons i e1 e2)
 .
 
 Inductive step : exp -> exp -> Prop :=
@@ -364,9 +478,23 @@ Inductive step : exp -> exp -> Prop :=
      step e e' ->
      type T ->
      step (exp_unfold T e) (exp_unfold T e')
+ | step_projrcd: forall e i vi ,
+     value e ->
+     tlookup i e = Some vi->
+     step (exp_rcd_proj e i) vi
+ | step_proj: forall e1 e2 i,
+     step e1 e2 ->
+     step (exp_rcd_proj e1 i) (exp_rcd_proj e2 i)
+ | step_rcd_head: forall e1 e2 e i,
+     step e1 e2 ->
+     step (exp_rcd_cons i e1 e) (exp_rcd_cons i e2 e)
+ | step_rcd_cons: forall v1 e1 e2 i,
+     value v1 ->
+     step e1 e2 ->
+     step (exp_rcd_cons i v1 e1) (exp_rcd_cons i v1 e2)
 .
 
-Hint Constructors type WF wf_env sub expr typing step value: core.
+Hint Constructors rt_type rt_expr type WF wf_env sub expr typing step value: core.
 
 
 Fixpoint fv_te (e : exp) {struct e} : atoms :=
@@ -380,6 +508,9 @@ Fixpoint fv_te (e : exp) {struct e} : atoms :=
   | exp_tapp e1 V => (fv_tt V) `union` (fv_te e1)
   | exp_fold V e => fv_tt V \u fv_te e
   | exp_unfold V e => fv_tt V \u fv_te e
+  | exp_rcd_nil => {}
+  | exp_rcd_cons i e1 e2 => (fv_te e1) `union` (fv_te e2)
+  | exp_rcd_proj e1 i => (fv_te e1)
   end.
 
 Fixpoint fv_ee (e : exp) {struct e} : atoms :=
@@ -392,7 +523,10 @@ Fixpoint fv_ee (e : exp) {struct e} : atoms :=
   | exp_tabs V e1 => (fv_ee e1)
   | exp_tapp e1 V => (fv_ee e1)
   | exp_fold V e => fv_ee e
-  | exp_unfold V e => fv_ee e                        
+  | exp_unfold V e => fv_ee e 
+  | exp_rcd_nil => {}
+  | exp_rcd_cons i e1 e2 => (fv_ee e1) `union` (fv_ee e2)
+  | exp_rcd_proj e1 i => (fv_ee e1)
   end.
 
 Fixpoint subst_te (Z : atom) (U : typ) (e : exp) {struct e} : exp :=
@@ -405,7 +539,10 @@ Fixpoint subst_te (Z : atom) (U : typ) (e : exp) {struct e} : exp :=
   | exp_tabs V e1 => exp_tabs (subst_tt Z U V)  (subst_te Z U e1)
   | exp_tapp e1 V => exp_tapp (subst_te Z U e1) (subst_tt Z U V)
   | exp_fold V e => exp_fold (subst_tt Z U V) (subst_te Z U e)
-  | exp_unfold V e => exp_unfold (subst_tt Z U V) (subst_te Z U e)                           
+  | exp_unfold V e => exp_unfold (subst_tt Z U V) (subst_te Z U e)
+  | exp_rcd_nil => exp_rcd_nil
+  | exp_rcd_cons i e1 e2 => exp_rcd_cons i (subst_te Z U e1) (subst_te Z U e2)
+  | exp_rcd_proj e1 i => exp_rcd_proj (subst_te Z U e1) i
   end.
 
 Fixpoint subst_ee (z : atom) (u : exp) (e : exp) {struct e} : exp :=
@@ -418,7 +555,10 @@ Fixpoint subst_ee (z : atom) (u : exp) (e : exp) {struct e} : exp :=
   | exp_tabs V e1 => exp_tabs V (subst_ee z u e1)
   | exp_tapp e1 V => exp_tapp (subst_ee z u e1) V
   | exp_fold V e => exp_fold V (subst_ee z u e)
-  | exp_unfold V e => exp_unfold V (subst_ee z u e)                                
+  | exp_unfold V e => exp_unfold V (subst_ee z u e)
+  | exp_rcd_nil => exp_rcd_nil
+  | exp_rcd_cons i e1 e2 => exp_rcd_cons i (subst_ee z u e1) (subst_ee z u e2)
+  | exp_rcd_proj e1 i => exp_rcd_proj (subst_ee z u e1) i
   end.
 
 Inductive Mode := Pos | Neg. 

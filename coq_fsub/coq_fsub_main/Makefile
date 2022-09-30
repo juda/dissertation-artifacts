@@ -20,6 +20,6 @@ $(COQMKFILENAME): Makefile $(shell ls *.v)
 	coq_makefile -arg '-w -variable-collision,-meta-collision,-require-in-module' -f _CoqProject -o $(COQMKFILENAME)
 
 coqclean:
-	rm -if *.v-e *.v.d *.vo *.glob *.vok *.vos $(COQMKFILENAME)
+	rm -if *.v-e *.v.d *.vo *.glob *.vos *.vok $(COQMKFILENAME)
 
 clean: coqclean

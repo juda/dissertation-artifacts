@@ -1,7 +1,7 @@
 Set Implicit Arguments.
 Require Import Metalib.Metatheory.
 Require Import Program.Equality.
-Require Export Variance.
+Require Export Progress.
 Require Export Coq.micromega.Lia.
 
 (* The first one is for recursive,
@@ -28,7 +28,7 @@ Fixpoint findX  (x:var) (G: list (atom * nat)) :=
 Fixpoint bindings_rec (G:genv) (E: menv) (n: nat) (T:typ) : nat :=
   match T with
   | typ_nat => 1
-  | typ_top => 1
+  | typ_bot => 1
   | typ_fvar x => 1 + match findX x G with
                       | Some k => k
                       | None => 1
@@ -44,7 +44,10 @@ Fixpoint bindings_rec (G:genv) (E: menv) (n: nat) (T:typ) : nat :=
     S (i + (bindings_rec G ((S n, i) :: E) (S n) B))
   | typ_mu A => 
        let i := bindings_rec G ((S n , 1) :: E) (S n) A in
-       S (bindings_rec G ((S n, S i) :: E) (S n) A)
+       S (bindings_rec G ((S n, i) :: E) (S n) A)
+  | typ_rcd_nil => 1
+  | typ_rcd_cons i T1 T2 =>
+      S (bindings_rec G E n T1) + (bindings_rec G E n T2)
   end.
 
 Fixpoint mk_benv (E:env) : genv :=
@@ -88,8 +91,8 @@ Qed.
 Inductive WFC :  typ -> nat -> Prop :=
 | WC_nat: forall k,
     WFC typ_nat k
-| WC_top: forall k,
-    WFC typ_top k
+| WC_bot: forall k,
+    WFC typ_bot k
 | WC_fvar: forall X k,
     WFC (typ_fvar X) k
 | WC_bvar: forall b k,
@@ -109,14 +112,20 @@ Inductive WFC :  typ -> nat -> Prop :=
 | WC_label: forall l A k,
     WFC A k ->
     WFC (typ_label l A) k
+| WC_nil: forall k,
+    WFC typ_rcd_nil k
+| WC_cons: forall i A B k,
+    WFC A k ->
+    WFC B k ->
+    WFC (typ_rcd_cons i A B) k
 .
 
 (* WFC typ n : type with < k binded variables *)
 Inductive WFD :  typ -> nat -> Prop :=
 | WD_nat: forall k,
     WFD typ_nat k
-| WD_top: forall k,
-    WFD typ_top k
+| WD_bot: forall k,
+    WFD typ_bot k
 | WD_fvar: forall X k,
     WFD (typ_fvar X) k
 | WD_bvar: forall b k,
@@ -136,6 +145,12 @@ Inductive WFD :  typ -> nat -> Prop :=
 | WD_rcd: forall l A k,
     WFD A k ->
     WFD (typ_label l A) k
+| WD_nil: forall k,
+    WFD typ_rcd_nil k
+| WD_cons: forall i A B k,
+    WFD A k ->
+    WFD B k ->
+    WFD (typ_rcd_cons i A B) k
 .
 
 Inductive WFE : menv -> nat -> Prop :=
@@ -299,7 +314,7 @@ Proof with auto.
             bindings_rec G (addone ((S n, 1)::E)) (S (S n)) A) by auto.
     rewrite H0...
     rewrite <- IHWFC ...
-    remember (S (bindings_rec G ((S n, 1) :: E) (S n) A)).
+    remember ((bindings_rec G ((S n, 1) :: E) (S n) A)).
     assert ((S (S n), n0) :: addone E = addone ((S n,n0)::E)) by auto.
     rewrite H1.
     rewrite <- IHWFC...
@@ -308,7 +323,7 @@ Qed.
 Fixpoint close_tt_rec (K : nat) (Z : atom) (T : typ) {struct T} : typ :=
   match T with
   | typ_nat         => typ_nat      
-  | typ_top         => typ_top              
+  | typ_bot         => typ_bot              
   | typ_bvar J      => typ_bvar J
   | typ_fvar X      => if X == Z then typ_bvar K else typ_fvar X 
   | typ_arrow T1 T2 => typ_arrow (close_tt_rec K Z T1) (close_tt_rec K Z T2)
@@ -316,6 +331,8 @@ Fixpoint close_tt_rec (K : nat) (Z : atom) (T : typ) {struct T} : typ :=
   | typ_all A B     => typ_all (close_tt_rec K Z A) 
                                 (close_tt_rec (S K) Z B)
   | typ_label l T => typ_label l (close_tt_rec K Z T)
+  | typ_rcd_nil => typ_rcd_nil
+  | typ_rcd_cons i A B => typ_rcd_cons i (close_tt_rec K Z A) (close_tt_rec K Z B)
   end.
 
 Definition close_tt T X := close_tt_rec 0 X T.
@@ -486,7 +503,7 @@ Proof with auto using WFE_S_n.
     remember (bindings_rec G ((S (n0 - q), 1) :: minusk E q) (S (n0 - q)) A).
     assert (S (n0 - q) = (S n0) - q) as W by  lia.
     rewrite W.
-    assert  ( ((S n0 - q, S n1) :: minusk E q) = minusk ((S n0, S n1)::E) q) as W2 by (simpl;auto).
+    assert  ( ((S n0 - q, n1) :: minusk E q) = minusk ((S n0, n1)::E) q) as W2 by (simpl;auto).
     rewrite W2.
     rewrite <- IHWFD...
     f_equal...
@@ -587,7 +604,7 @@ Proof with eauto.
     simpl.
     f_equal.
     remember (bindings_rec G ((S n, 1) :: E1 ++ E2) (S n) A).
-    rewrite_env (((S n, S n0) :: E1) ++ E2).
+    rewrite_env (((S n, n0) :: E1) ++ E2).
     rewrite IHWFD...
     subst.
     rewrite_env (((S n, 1) :: E1) ++ E2).
@@ -670,7 +687,7 @@ Proof with auto.
     apply H0. simpl...
   - simpl. f_equal. destruct T...
     rewrite IHWFD... 2:{ constructor... apply WFE_find_none... }
-    simpl. f_equal. f_equal. f_equal. f_equal.
+    simpl. f_equal. f_equal. f_equal.
     rewrite IHWFD... { constructor... apply WFE_find_none... }
   - simpl. f_equal. destruct T... simpl in H0.
     rewrite IHWFD1... f_equal.
@@ -791,23 +808,23 @@ Proof with auto.
     dependent destruction H1...
     simpl.
     f_equal.
-    remember (S n, S
+    remember (S n, 
       (bindings_rec G
          ((S n, 1) :: E1 ++ (0, bindings_rec G (E1 ++ E2) n B - 1) :: E2) 
          (S n) A)) as R1.
     assert (bindings_rec G (E1++E2) n B = bindings_rec G (R1 :: E1++E2) (S n) B) as Q1.
     subst.
     apply bindings_close...
-    rewrite Q1.    
+    rewrite Q1.
     rewrite_alist ((R1 :: E1) ++ (0, bindings_rec G ((R1 :: E1) ++ E2) (S n) B - 1) :: E2).
     rewrite <- IHA...
     f_equal...
-    remember (bindings_rec G ((S n, 0) :: E1 ++ E2) (S n) (open_tt_rec (S n) B A)) as R2.
+    remember (bindings_rec G ((S n, 1) :: E1 ++ E2) (S n) (open_tt_rec (S n) B A)) as R2.
     rewrite_alist (R1 :: E1 ++ E2).
     f_equal.
     subst.
     f_equal...
-    f_equal.
+    (* f_equal. *)
     assert (bindings_rec G (E1++E2) n B = bindings_rec G (((S n, 1) :: E1)++E2) (S n) B) as Q2.
     apply bindings_close...
     rewrite Q2.
@@ -935,9 +952,9 @@ Proof with auto.
     dependent destruction H. simpl in H0.
     f_equal.
 
-    remember (S (bindings_rec ((X, bindings_rec (mk_benv G) empty_menv 0 B) :: mk_benv G) ((S n, 1) :: E1 ++ E2) (S n) (open_tt_rec (S n) X A))) as K1.
+    remember ((bindings_rec ((X, bindings_rec (mk_benv G) empty_menv 0 B) :: mk_benv G) ((S n, 1) :: E1 ++ E2) (S n) (open_tt_rec (S n) X A))) as K1.
 
-    remember (S
+    remember (
     (bindings_rec (mk_benv G)
        ((S n, 1) :: E1 ++ (0, bindings_rec (mk_benv G) (E1 ++ E2) n B) :: E2)
        (S n) A))  as K2.
@@ -953,7 +970,7 @@ Proof with auto.
     rewrite_alist ((S n, K1) :: (E1 ++ E2)).
     rewrite <- bindings_close with (B:=B)... simpl.
     f_equal. f_equal. f_equal. subst K1 K2.
-    f_equal.
+    (* f_equal. *)
 
     rewrite_alist (((S n, 1) :: E1) ++ E2).
     rewrite IHA...
@@ -966,6 +983,10 @@ Proof with auto.
     
   - simpl. f_equal. simpl in IHA. simpl in H0.
     rewrite IHA... inversion H...
+  -
+    inversion H;subst. simpl in H0.
+    simpl. f_equal. simpl in IHA1. simpl in IHA2.
+    rewrite IHA1... 
 Qed.
 
 
@@ -1059,16 +1080,17 @@ Proof with auto.
     assert (sub_menv ((S n, 1) :: R1) ((S n, 1) :: R2))...
     pose proof IHA (S n) _ _ H0.
     assert (sub_menv
-    (((S n, S (bindings_rec G ((S n, 1) :: R1) (S n) A)) :: R1))
-    (((S n, S (bindings_rec G ((S n, 1) :: R2) (S n) A)) :: R2))
+    (((S n, (bindings_rec G ((S n, 1) :: R1) (S n) A)) :: R1))
+    (((S n, (bindings_rec G ((S n, 1) :: R2) (S n) A)) :: R2))
     )...
-    { constructor... lia. }
     pose proof IHA (S n) _ _ H2. lia.
   - simpl. specialize (IHA n _ _ H). lia.
+  - simpl. specialize (IHA1 n _ _ H). specialize (IHA2 n _ _ H).
+    lia.
 Qed.
 
 
-Ltac solve_right_dec := right;intro v;inversion v;auto.
+Ltac solve_right_dec := right;intro v;inversion v;try inv_rt;auto.
 
 
 Lemma WFC_dec : forall m A,
@@ -1084,6 +1106,8 @@ Proof with auto.
     destruct (IHA2 (S m)); try solve [solve_right_dec]...
   - destruct (IHA (S m)); try solve [solve_right_dec]...
   - destruct (IHA m); try solve [solve_right_dec]...
+  - destruct (IHA1 m); try solve [solve_right_dec].
+    destruct (IHA2 (m)); try solve [solve_right_dec]...
 Qed.
 
 Lemma wf_fvar_dec: forall E (a:atom), 
@@ -1118,7 +1142,23 @@ Proof with auto.
   apply notin_add_1 in H.
   destruct H...
 Qed.  
-  
+
+Lemma rt_type_dec: forall A,
+  { rt_type A } + { ~ rt_type A }.
+Proof with auto.
+  intros. destruct A;try solve [left;constructor|right;intros C;inversion C].
+Qed.
+
+Lemma collectLabelDec: forall i A,
+  { i `in` collectLabel A } + { i `notin` collectLabel A }.
+Proof with auto.
+  intros. induction A;try solve [right;simpl;apply notin_empty_1].
+  - simpl. destruct IHA2.
+    + left. apply union_iff. right...
+    + destruct (i == a)...
+Qed.
+
+
 Lemma wf_dec_aux : forall G k A E,
   uniq E -> 
   (* new constraint,
@@ -1131,7 +1171,7 @@ Lemma wf_dec_aux : forall G k A E,
 Proof with auto.
   induction k.
   -
-    induction A;intros;try solve [unfold bindings in *;simpl in *;lia]...
+    induction A;intros;try solve [simpl in *;exfalso;lia]...
 (*     
     + (* bvar *)
       right. intros C. inversion C.
@@ -1198,21 +1238,21 @@ Proof with auto.
       pick fresh X.
       remember (open_tt A X) as Q1.
       remember (open_tt A (typ_label X (open_tt A X))) as Q2.
-      destruct IHk with (A:=Q1) (E:= X ~ bind_sub typ_top ++ E)...
+      destruct IHk with (A:=Q1) (E:= X ~ bind_sub typ_bot ++ E)...
       { subst. rewrite_alist (empty_menv ++ empty_menv).
         rewrite bindings_find...
         rewrite bindings_add... unfold zero. simpl.
+        rewrite findX_notin...
         simpl.
         eapply le_trans.
         { apply sub_menv_sem with 
-            (R2:=((1, S (bindings_rec G ((1, 1) :: empty_menv) 1 A)) :: empty_menv)). 
+            (R2:=((1, (bindings_rec G ((1, 1) :: empty_menv) 1 A)) :: empty_menv)). 
           constructor...
-          rewrite findX_notin...
-          lia. }
+          apply bindings_rec_ge_1. }
         lia. }
       
       * (* open_tt A X is well-formed  *)
-        destruct IHk with (A:=Q2) (E:= X ~ bind_sub typ_top ++ E)...
+        destruct IHk with (A:=Q2) (E:= X ~ bind_sub typ_bot ++ E)...
         { subst. rewrite_alist (empty_menv ++ empty_menv).
           rewrite bindings_find...
           2:{ apply WF_type in w0... }
@@ -1244,12 +1284,12 @@ Proof with auto.
            rewrite eq_dec_refl in w1.
            rewrite <- subst_tt_fresh in w1...
            (* stuck: how to get 
-           WF (X0 ~ bind_sub typ_top ++ E) 
+           WF (X0 ~ bind_sub typ_bot ++ E) 
               (open_tt A (typ_label X0 (open_tt A X0)))
 
            from 
 
-           WF ((X0, bind_sub typ_top) :: E)
+           WF ((X0, bind_sub typ_bot) :: E)
              (open_tt A (typ_label X (open_tt A X0)))           
             *)
            apply WF_renaming_tl with (X:=X) (Y:=X0) in w1...
@@ -1273,6 +1313,13 @@ Proof with auto.
   + (* label *)
     simpl in H0.
     destruct IHA with (E:=E);try solve [lia|solve_right_dec]...
+
+  + (* rcd *)
+    simpl in H0.
+    destruct IHA1 with (E:=E);try solve [lia|solve_right_dec]...
+    destruct IHA2 with (E:=E);try solve [lia|solve_right_dec]...
+    destruct (rt_type_dec A2);try solve [lia|solve_right_dec]...
+    destruct (collectLabelDec a A2);try solve [lia|solve_right_dec]...
 Qed.
 
 
@@ -1348,17 +1395,395 @@ Proof with auto.
 Qed.
 
 
-Ltac solve_top_dec E := 
+Ltac solve_bot_dec E := 
   pose wf_env_dec as Q;destruct Q with (E:=E) as [Ql|Qr];try solve [
   left;auto |
   solve_right_dec  ].
-Ltac solve_top_wfs_dec E A := 
+Ltac solve_bot_wfs_dec E A := 
   match goal with
   | H : wf_env E |- _ =>    
     destruct (wf_dec A (uniq_from_wf_env H)); 
     try solve [left;auto|right;intros v;dependent destruction v;auto]
   | _ => idtac
   end.
+
+Lemma find_var_one: forall Q G X E n,
+  X \notin dom G ->
+  bindings_rec ( G) E n Q = 
+  bindings_rec (X ~ 1 ++  G) E n Q.
+Proof with auto.
+  intros Q G X.
+  induction Q;intros...
+  + simpl. destruct (a == X)...
+    subst.
+    rewrite (findX_notin _ H)...
+  + simpl. rewrite IHQ1...
+  + simpl. rewrite IHQ1...
+  + simpl. rewrite IHQ...
+    f_equal. f_equal. f_equal.
+    f_equal. rewrite IHQ...
+  + simpl...
+  + simpl. rewrite IHQ1...
+Qed.
+
+Lemma mk_benv_dom: forall X G,
+  X `notin` dom G -> X `notin` dom (mk_benv G).
+Proof with auto.
+  induction G;intros...
+  + intros. destruct a. simpl. destruct b...
+Qed.
+
+Lemma bindings_drop_label: forall T E G t i,
+WF E T ->
+Tlookup i T = Some t ->
+S (bindings_rec (mk_benv E) G 0 t + bindings_rec (mk_benv E) G 0 (dropLabel i T)) =
+bindings_rec (mk_benv E) G 0 T.
+Proof with auto.
+  intros T.
+  induction T;intros;try solve [inversion H0]...
+  + simpl. simpl in H0. destruct (a == i).
+    * inversion H0. subst. inversion H;subst...
+      rewrite dropLable_notin with (E:=E)...
+    * inversion H;subst...
+      rewrite <- IHT2 with (t:=t) (i:=i)...
+      simpl. lia.
+Qed.
+
+Lemma subset_dec: forall A B, { A [<=] B} + { ~ A [<=] B}.
+Proof with auto.
+  intros. destruct (AtomSetImpl.subset A B) eqn:E'.
+  + apply subset_iff in E'...
+  + right. intros C. apply subset_iff in C...
+    rewrite C in E'. inversion E'.
+Qed.
+
+
+
+(* Lemma dropLabel_first_element': forall i T1 T2,
+    (* WF E (typ_rcd_cons i T1 T2) -> *)
+    dropLabel i (typ_rcd_cons i T1 T2) = T2.
+Proof with auto.
+  intros. simpl. rewrite eq_dec_refl.
+  dependent destruction H...
+  simpl...
+  destruct (i==i)...
+  apply dropLable_notin with (E:=E)...
+  destruct n...
+Qed. *)
+
+(* Lemma record_permutation_exists_aux:
+forall E j x a T1 T2,
+rt_type T2 -> a <> j ->
+equiv E (typ_rcd_cons j x (dropLabel j T2)) T2 ->
+equiv E (typ_rcd_cons j x (dropLabel j (typ_rcd_cons a T1 T2)))
+  (typ_rcd_cons a T1 T2).
+Proof with auto.
+  intros.
+  destruct H1 as [e1 e2].
+  split.
+  + inversion e1;subst;inv_rt.
+    simpl. destruct (a == j);try solve [exfalso;auto]...
+    apply sa_rcd;try solve [get_well_form;auto]...
+    - simpl. 
+      simpl. simpl in H4. admit.
+    - inversion H5;subst. constructor... *)
+
+Lemma equiv_trans: forall E P Q R,
+  equiv E P Q -> equiv E Q R -> equiv E P R.
+Proof.
+  intros.
+  destruct H. destruct H0.
+  split;apply sub_transitivity with (Q:=Q);auto.
+Qed.
+
+Lemma sub_rcd_proper: forall E a T1 T2 T1' T2',
+  sub E T1 T1' ->
+  sub E T2 T2' -> 
+  rt_type T2 -> rt_type T2' ->
+  a `notin` collectLabel T2 ->
+  sub E (typ_rcd_cons a T1 T2) (typ_rcd_cons a T1' T2').
+Proof with auto.
+  intros.
+  apply sa_rcd...
+  + get_well_form...
+  + simpl.
+    rewrite <- !KeySetProperties.add_union_singleton.
+    apply add_s_m...
+    inversion H0;subst;inv_rt...
+  + constructor;try solve [get_well_form;auto]...
+  + constructor;try solve [get_well_form;auto]...
+    inversion H0;subst;inv_rt...
+  + intros. simpl in H4, H5. destruct (a==i).
+    * inversion H4;subst. inversion H5;subst...
+    * inversion H0;subst;inv_rt...
+      apply H12 with (i:=i)...
+Qed.
+
+
+Lemma equiv_rcd_proper: forall E a T1 T2 T1' T2',
+  equiv E T1 T1' ->
+  equiv E T2 T2' -> 
+  rt_type T2 -> rt_type T2' ->
+  a `notin` collectLabel T2 ->
+  equiv E (typ_rcd_cons a T1 T2) (typ_rcd_cons a T1' T2').
+Proof with auto.
+  intros. destruct H as [H H'], H0 as [H0 H0'].
+  split.
+  { apply sub_rcd_proper... }
+  { apply sub_rcd_proper...
+    inversion H0;subst;inv_rt...
+  }
+Qed.
+
+
+Lemma sub_rcd_first_permute: forall E a b T1 T2 T3,
+  wf_env E -> WF E  (typ_rcd_cons a T1 (typ_rcd_cons b T2 T3)) ->
+  sub E (typ_rcd_cons a T1 (typ_rcd_cons b T2 T3)) 
+  (typ_rcd_cons b T2 (typ_rcd_cons a T1 T3)).
+Proof with auto.
+  intros.
+  { apply sa_rcd...
+    + simpl. rewrite <- !KeySetProperties.union_assoc.
+      rewrite KeySetProperties.union_sym with (s:= singleton a). reflexivity.
+    + inversion H0;subst. inversion H6;subst.
+      constructor... 2:{ simpl in H8... }
+      constructor... { simpl in H8 ... }
+    + intros. simpl in H1, H2.
+      assert (a <> b). { inversion H0;subst. simpl in H10... }
+      destruct (a==i), (b==i);try inversion H1; try inversion H2;subst...
+      * congruence.
+      * apply Reflexivity... inversion H0...
+      * apply Reflexivity... inversion H0... inversion H9...
+      * assert (t1 = t2) by congruence. subst.
+        apply Reflexivity... apply wf_rcd_lookup with (E:=E) in H1...
+        inversion H0... inversion H11...
+  }
+Qed.
+
+
+Lemma equiv_rcd_first_permute: forall E a b T1 T2 T3,
+  wf_env E -> WF E  (typ_rcd_cons a T1 (typ_rcd_cons b T2 T3)) ->
+  equiv E (typ_rcd_cons a T1 (typ_rcd_cons b T2 T3)) 
+  (typ_rcd_cons b T2 (typ_rcd_cons a T1 T3)).
+Proof with auto.
+  intros.
+  split.
+  { apply sub_rcd_first_permute... }
+  { apply sub_rcd_first_permute...
+    inversion H0;subst.
+    inversion H6;subst.
+    constructor... 2:{ simpl in H8... }
+    constructor... { simpl in H8 ... }
+  }
+Qed.
+
+
+
+Lemma record_permutation_exists:
+  forall j E T,
+  wf_env E -> 
+  j `in` collectLabel T ->
+  { A' |
+    equiv E (typ_rcd_cons j A' ((dropLabel j T))) T} + {~ WF E T}.
+Proof with auto.
+  intros.
+  induction T;try solve [apply empty_iff in H0;destruct H0].
+  - simpl in H0.
+    destruct (Atom.eq_dec j a).
+    + subst j. 
+      solve_bot_wfs_dec E (typ_rcd_cons a T1 T2).
+      left. exists T1.
+      rewrite dropLabel_first_element with (E:=E)...
+      apply equiv_reflexivity...
+    + solve_bot_wfs_dec E (typ_rcd_cons a T1 T2).
+      destruct (collectLabelDec j T2).
+      2:{ assert (j `notin` union (singleton a) (collectLabel T2))... }
+      destruct (IHT2 i);try solve [solve_right_dec].
+      left. destruct s. exists x.
+      simpl. destruct (a ==j);try solve [exfalso;auto]...
+      apply equiv_trans with 
+        (Q:= (typ_rcd_cons a T1 (typ_rcd_cons j x (dropLabel j T2)))).
+      * apply equiv_rcd_first_permute...
+        { destruct e. get_well_form.
+          inversion H5;subst.
+          inversion w;subst. constructor...
+          constructor... apply notin_drop_collect... } 
+      * apply equiv_rcd_proper...
+        { apply equiv_reflexivity...
+          { inversion w;subst... }
+        }
+        { inversion w;subst... }
+        { simpl. solve_notin. apply notin_drop_collect...
+          inversion w... }
+Qed.
+
+Lemma equiv_measure: forall A,
+  type4rec A -> forall B, type4rec B -> forall E,
+  sub E A B -> sub E B A ->
+  bindings_rec (mk_benv E) nil 0 A = bindings_rec (mk_benv E) nil 0 B.
+Proof with auto.
+  intros A HA;induction HA.
+  - intros B HB;induction HB;intros;
+    try solve [simpl; lia| inversion H;inv_rt|inversion H0;inv_rt|
+    inversion H1;inv_rt|
+      inversion H2;inv_rt|inversion H3;inv_rt|inversion H4;inv_rt].
+  - intros B HB;induction HB;intros;
+  try solve [simpl; lia| inversion H;inv_rt|inversion H0;inv_rt|
+  inversion H1;inv_rt|
+    inversion H2;inv_rt|inversion H3;inv_rt].
+  - intros B HB;induction HB;intros;
+  try solve [simpl; lia| inversion H;inv_rt|inversion H0;inv_rt|
+  inversion H1;inv_rt|
+    inversion H2;inv_rt|inversion H3;inv_rt| inversion H4;inv_rt].
+    apply suba_sub_tvar_chain in H.
+    apply suba_sub_tvar_chain in H0.
+    destruct H as [W1], H0 as [W2].
+    pose proof sub_tvar_chain_antisym H H0. subst. lia.
+  - intros. dependent destruction H0.
+    { dependent destruction H2. inv_rt. }
+    2:{ inv_rt. }
+    dependent destruction H1.
+    2:{ inv_rt. }
+    simpl. 
+    rewrite IHHA1 with (B:=B1)...
+    2:{ apply type_to_rec. apply WF_type with (E:=E). get_well_form... }
+    rewrite IHHA2 with (B:=B2)...
+    { apply type_to_rec. apply WF_type with (E:=E). get_well_form... }
+  - intros. rename T into A1.
+    dependent destruction H4.
+    { dependent destruction H6. inv_rt. }
+    2:{ inv_rt. }
+    dependent destruction H7.
+    2:{ inv_rt. }
+    dependent destruction H3.
+    pick_fresh X.
+    specialize_x_and_L X L.
+    specialize_x_and_L X L0.
+    specialize_x_and_L X L1.
+    specialize_x_and_L X L2.
+
+
+    assert (Eh1: sub (X ~ bind_sub typ_bot ++ E) (open_tt A1 X) (open_tt A2 X)).
+    { apply sub_nominal_inversion... }
+    assert (Eh2: sub (X ~ bind_sub typ_bot ++ E) (open_tt A2 X) (open_tt A1 X)).
+    { apply sub_nominal_inversion... }
+    simpl.
+
+    specialize (H2 _ H4 ((X ~ bind_sub typ_bot) ++ E) Eh1 Eh2).
+    assert (WFC A2 0).
+    { apply type_open_tt_WFC with (X:=X)... 
+        apply type4rec_to_type... }
+    assert (WFC A1 0).
+    { apply type_open_tt_WFC with (X:=X)... 
+        apply type4rec_to_type... }
+
+
+    rewrite_env (empty_menv ++ empty_menv) in H2...
+    pose proof H2 as H2'. simpl in H2'.
+    rewrite bindings_find in H2... 
+    rewrite bindings_add in H2... 
+    rewrite bindings_find in H2... 
+    rewrite bindings_add with (A:=A2) in H2... 
+    unfold zero in H2. simpl in H2. rewrite eq_dec_refl in H2.
+    replace (1-0) with 1 in H2...
+    rewrite_env (X ~ 1 ++ mk_benv E) in H2.
+    rewrite <- find_var_one with (X:=X) in H2...
+    2:{ apply mk_benv_dom... }
+    rewrite <- find_var_one with (X:=X) in H2...
+    2:{ apply mk_benv_dom... }
+    rewrite H2. f_equal...
+
+
+
+    specialize (H0 _ H3 ((X ~ bind_sub typ_bot) ++ E) H7 H10).
+
+    rewrite_env (empty_menv ++ empty_menv) in H0...
+    rewrite bindings_find in H0... 
+    rewrite bindings_add in H0... 
+    rewrite bindings_find in H0... 
+    rewrite bindings_add with (A:=A2) in H0... 
+    unfold zero in H0. simpl in H0. rewrite H2' in H0.
+    rewrite_env (X ~ 1 ++ mk_benv E) in H0.
+    rewrite <- find_var_one with (X:=X) in H0...
+    2:{ apply mk_benv_dom... }
+    rewrite <- find_var_one with (Q:=A2) (X:=X) in H0...
+    2:{ apply mk_benv_dom... }
+    rewrite <- find_var_one with (X:=X) in H0...
+    2:{ apply mk_benv_dom... }
+
+    rewrite_env (empty_menv ++ empty_menv) in H0...
+    rewrite bindings_find in H0...
+    replace (bindings_rec (mk_benv E) (empty_menv ++ empty_menv) 0 X) with 2 in H0.
+    2:{ simpl. rewrite findX_notin... apply mk_benv_dom... }
+    simpl in H0. rewrite bindings_add with (A:=A2) in H0...
+    simpl in H0. unfold zero in H0. rewrite Nat.sub_0_r in H0...
+
+constructor. apply WF_type with (E:=X ~ bind_sub typ_bot ++ E)...
+constructor. apply WF_type with (E:=X ~ bind_sub typ_bot ++ E)...
+
+
+- 
+  intros.
+  dependent destruction H2.
+  { dependent destruction H4. inv_rt. }
+  2:{ inv_rt. }
+  dependent destruction H3.
+  2:{ inv_rt. }
+  rename T2 into S1. rename S2 into T2.
+  rename T3 into S2.
+  inversion H1;subst.
+  pick_fresh X.
+  specialize_x_and_L X L.
+  specialize_x_and_L X L0.
+  specialize_x_and_L X L1.
+  specialize_x_and_L X L2.
+  specialize (IHHA _ H6 E H2_ H2_0).
+  simpl. rewrite IHHA. f_equal. f_equal.
+
+  rewrite_env (nil ++ X ~ bind_sub T1 ++ E) in H3.
+  apply sub_narrowing with (P:=T2) in H3...
+
+  specialize (H0 _ H7 (X ~ bind_sub T2 ++ E) H2 H3).
+
+  apply type4rec_to_type in H6.
+  get_well_form...
+  assert (WFC S1 0). { apply type_open_tt_WFC with (X:=X)... apply WF_type with (E:=X~bind_sub T2 ++ E)... }
+  assert (WFC S2 0). { apply type_open_tt_WFC with (X:=X)... apply WF_type with (E:=X~bind_sub T2 ++ E)... }
+  rewrite bindings_fvar_spec in H0...
+  rewrite bindings_fvar_spec with (A:=S2) in H0...
+
+-
+  intros.
+  dependent destruction H0.
+  { dependent destruction H2. inv_rt. }
+  2:{ inv_rt. }
+  dependent destruction H1.
+  2:{ inv_rt. }
+  dependent destruction H.
+  simpl. f_equal. apply IHHA...
+
+-
+  intros. dependent destruction H0.
+  { dependent destruction H2. inv_rt. }
+  dependent destruction H7;try inv_rt...
+  dependent destruction H8...
+  simpl in H3. collect_nil H3.
+-
+  intros. inversion H1;subst.
+  { dependent destruction H2;try inv_rt. }
+  inversion H2;subst;try inv_rt...
+  dependent destruction H5...
+  { simpl in H13. collect_nil H13. }
+  simpl.
+  assert (equiv E (typ_rcd_cons i0 T0 T3)  (typ_rcd_cons i T1 T2)) by (split;auto)...
+  apply record_permutation in H5. unfold equiv in H5. destruct_hypos.
+  rewrite IHHA1 with (B:=x)...
+  2:{ apply type_to_rec. apply WF_type with (E:=E). get_well_form... }
+  rewrite IHHA2 with (B:=(dropLabel i (typ_rcd_cons i0 T0 T3)))...
+  2:{ apply type_to_rec. apply WF_type with (E:=E). apply WF_drop. get_well_form... }
+  pose proof bindings_drop_label (T:=typ_rcd_cons i0 T0 T3) (E:=E) empty_menv (t:=x) i.
+  rewrite H22...
+Qed.
 
 
 
@@ -1369,18 +1794,18 @@ bindings_rec (mk_benv E) nil 0 B <= k ->
 Proof with auto.
 induction k.
 -
-induction A;intros;try solve [unfold bindings in *;simpl in *;lia]...
+induction A;intros;try solve [unfold bindings in *;exfalso;simpl in *;lia]...
 -
-induction A.
+induction B.
 +
-  induction B;intros;try solve [ solve_right_dec | solve_top_dec E]...
+  induction A;intros;try solve [ solve_right_dec | solve_bot_dec E]...
 
 +
-  induction B;intros;try solve [ solve_right_dec | solve_top_dec E]...
+  induction A;intros;try solve [ solve_right_dec | solve_bot_dec E]...
 
 +
-  induction B;intros;try solve [ solve_right_dec | solve_top_dec E]...
-  right. intros C. inversion C;subst. inversion H1.
+  induction A;intros;try solve [ solve_right_dec | solve_bot_dec E]...
+  right. intros C. inversion C;subst. inversion H1. inv_rt.
       
 +
   intros. simpl in H.
@@ -1398,22 +1823,24 @@ induction A.
       (* 2:{ apply binds_split in b.
         destruct b as [E1 [E2 b]]. rewrite b in w.
         apply wf_env_binds_not_fv_tt in w... } *)
-      apply le_S_n in H.
-      destruct (IHk _ _ _ H)...
+      destruct (IHk A t E).
+      { lia. }
+      (* apply le_S_n in H.
+      destruct (IHk _ _ _ H)... *)
       { left. apply sa_trans_tvar with (U:=t)... }
-      { destruct (EqDec_eq a B).
+      { destruct (EqDec_eq a A).
         { left. subst. apply sa_fvar... apply WF_var with (U:=t)... }
-        destruct (EqDec_eq typ_top B).
-        { left. subst. apply sa_top... apply WF_var with (U:=t)... }
-        right. intros C. inversion C;subst...
+        destruct (EqDec_eq typ_bot A).
+        { left. subst. apply sa_bot... apply WF_var with (U:=t)... }
+        right. intros C. inversion C;inv_rt;subst...
         { assert (bind_sub t =  bind_sub U). 
           { eapply binds_unique with (x:=a) (E:=E)... }
           inversion H1;subst... }
       }
     }
     { right. intros C. apply uniq_from_wf_env in w.
-      inversion C;subst.
-      { inversion H3;subst. pose proof binds_unique _ _ _ _ _ b H4 w.
+      inversion C;subst;inv_rt.
+      { inversion H4;subst. pose proof binds_unique _ _ _ _ _ b H3 w.
         inversion H0.  }
       { inversion H1;subst. pose proof binds_unique _ _ _ _ _ b H4 w.
         inversion H2.  }
@@ -1423,15 +1850,15 @@ induction A.
 
   *
     right. intros C.
-    inversion C;subst...
-    { inversion H3;subst. apply n in H4... }
+    inversion C;inv_rt;subst...
+    { inversion H4;subst. apply n in H3... }
     { inversion H1;subst. apply n in H4... }
     { apply n in H1... }
 
 
 + intros. simpl in H.
-  induction B;intros;try solve [ solve_right_dec | solve_top_dec E]...
-  * solve_top_dec E. solve_top_wfs_dec E (typ_arrow A1 A2).
+  induction A;intros;try solve [ solve_right_dec | solve_bot_dec E]...
+  * solve_bot_dec E. solve_bot_wfs_dec E (typ_arrow B1 B2).
   
   *
     simpl in H.
@@ -1442,78 +1869,99 @@ induction A.
 
 +
   intros. simpl in H.
-  induction B;intros;try solve [ solve_right_dec]...
-  * solve_top_dec E. solve_top_wfs_dec E (typ_all A1 A2).
+  induction A;intros;try solve [ solve_right_dec]...
+  * solve_bot_dec E. solve_bot_wfs_dec E (typ_all B1 B2).
 
   *
-    destruct (EqDec_eq A1 B1);try solve [solve_right_dec].
-    subst B1. rename A1 into A.
-    rename A2 into B1.
+    destruct (IHk A1 B1 E); try solve [solve_right_dec].
+    { simpl in H. lia. }
+    destruct (IHk B1 A1 E); try solve [solve_right_dec].
+    { simpl in H. lia. }
+
+
+    (* destruct (EqDec_eq A1 B1);try solve [solve_right_dec]. *)
+    (* rename A1 into A. *)
+    (* rename A2 into B1. *)
 
     destruct (wf_env_dec E).
     2:{ right. intros C. apply sub_regular in C. destruct C as [? [? ?]]... }
     pose proof uniq_from_wf_env w as u.
-    destruct (wf_dec A u);try solve [solve_right_dec].
+    (* destruct (wf_dec A1 u);try solve [solve_right_dec]. *)
 
-    pick_fresh X1. assert (uniq ((X1 ~ bind_sub A) ++ E)) as u2...
-    destruct (wf_dec (open_tt B1 X1) u2).
+    pick_fresh X1.
+    assert (uniq ((X1 ~ bind_sub A1) ++ E)) as u2...
+    assert (uniq ((X1 ~ bind_sub B1) ++ E)) as u3...
+    destruct (wf_dec (open_tt A2 X1) u2).
     2:{ right. intros C.
         apply sub_regular in C. destruct C as [? [? ?]].
         inversion H1;subst.
         pick_fresh X2. specialize_x_and_L X2 L.
         apply n. apply WF_replacing_var with (X:=X2)... }
-    destruct (wf_dec (open_tt B2 X1) u2).
+    destruct (wf_dec (open_tt B2 X1) u3).
     2:{ right. intros C.
         apply sub_regular in C. destruct C as [? [? ?]].
         inversion H2;subst.
         pick_fresh X2. specialize_x_and_L X2 L.
         apply n. apply WF_replacing_var with (X:=X2)... }
+    
 
     clear IHA1 IHA2 IHB1 IHB2. simpl in H.
 
-    specialize (IHk (open_tt B1 X1) (open_tt B2 X1)
-    (X1 ~ bind_sub A ++ E)).
+    specialize (IHk (open_tt A2 X1) (open_tt B2 X1)
+    (X1 ~ bind_sub B1 ++ E)).
 
+    rewrite <- bindings_fvar_spec with (X:=X1)in H...
+    2:{ apply type_open_tt_WFC with (X:=X1)... apply WF_type in w0... }
+    2:{ get_well_form... }
+    2:{ get_well_form... apply WF_type in H4... }
+    
     rewrite <- bindings_fvar_spec with (X:=X1)in H...
     2:{ apply type_open_tt_WFC with (X:=X1)... apply WF_type in w1... }
-    2:{ apply WF_type in w0... }
+    2:{ get_well_form... }
+    2:{ get_well_form... apply WF_type in H5... } 
 
-    rewrite <- bindings_fvar_spec with (X:=X1)in H...
-    2:{ apply type_open_tt_WFC with (X:=X1)... apply WF_type in w2... }
-    2:{ apply WF_type in w0... }
-    
+    assert (Eq: bindings_rec (mk_benv E) empty_menv 0 A1 = bindings_rec (mk_benv E) empty_menv 0 B1).
+    { apply equiv_measure...
+      { apply type_to_rec. apply WF_type with (E:=E). get_well_form... }
+      { apply type_to_rec. apply WF_type with (E:=E). get_well_form... }
+    }
+    rewrite Eq in *.
+
     destruct IHk.
-    { lia. }
+    { simpl in H. simpl. rewrite Eq in H. lia. }
     { left.
-      apply sa_all with (L:={{X1}} \u fv_tt A \u fv_tt B1 \u fv_tt B2 \u dom E);intros...
+      apply sa_all with (L:={{X1}} \u fv_tt A1 \u fv_tt A2 \u fv_tt B1 \u fv_tt B2 \u dom E);intros...
+      (* { apply Reflexivity... } { apply Reflexivity... } *)
       apply sub_replacing_var with (X:=X1)...
+      get_well_form...
     }
     { right. intros. intros C.
-      inversion C. subst. pick_fresh X2.
+      inversion C;inv_rt. subst. pick_fresh X2.
       specialize_x_and_L X2 L.
-      apply n. apply sub_replacing_var with (X:=X2)... }
+      apply n. apply sub_replacing_var with (X:=X2)...
+      get_well_form... }
 
 
 + 
   intros. simpl in H.
-  induction B;intros;try solve [ solve_right_dec]...
-  * solve_top_dec E. solve_top_wfs_dec E (typ_mu A).
+  induction A;intros;try solve [ solve_right_dec]...
+  * solve_bot_dec E. solve_bot_wfs_dec E (typ_mu B).
 
   *
     destruct (wf_env_dec E).
     2:{ right. intros C. apply sub_regular in C. destruct C as [? [? ?]]... }
     pose proof uniq_from_wf_env w as u.
 
-    pick_fresh X1. assert (uniq ((X1 ~ bind_sub typ_top) ++ E)) as u2...
+    pick_fresh X1. assert (uniq ((X1 ~ bind_sub typ_bot) ++ E)) as u2...
     
     destruct (wf_dec (open_tt A X1) u2).
     2:{ right. intros C. apply n.
-        inversion C. subst.
+        inversion C;inv_rt. subst.
         pick_fresh X2. specialize_x_and_L X2 L.
         apply WF_replacing_var with (X:=X2)... }
     destruct (wf_dec (open_tt B X1) u2).
     2:{ right. intros C. apply n.
-        inversion C. subst.
+        inversion C;inv_rt. subst.
         pick_fresh X2. specialize_x_and_L X2 L.
         apply WF_replacing_var with (X:=X2)... }
 
@@ -1521,7 +1969,7 @@ induction A.
 
     specialize (IHk (open_tt A (typ_label X1 (open_tt A X1)))
     (open_tt B (typ_label X1 (open_tt B X1)))
-    (X1 ~ bind_sub typ_top ++ E)).
+    (X1 ~ bind_sub typ_bot ++ E)).
 
     assert (WFC A 0). { apply WF_type in w0. apply type_open_tt_WFC in w0... }
     assert (WFC B 0). { apply WF_type in w1. apply type_open_tt_WFC in w1... }
@@ -1564,7 +2012,7 @@ induction A.
       }
     }
     { right. intros. intros C.
-      inversion C. subst. pick_fresh X2.
+      inversion C;inv_rt. subst. pick_fresh X2.
       specialize_x_and_L X2 L.
       apply n. simpl.
       apply sub_renaming_unfolding with (X:=X2)...
@@ -1572,8 +2020,8 @@ induction A.
 
 + 
   intros. simpl in H.
-  induction B;intros;try solve [ solve_right_dec]...
-  * solve_top_dec E. solve_top_wfs_dec E (typ_label a A).
+  induction A;intros;try solve [ solve_right_dec]...
+  * solve_bot_dec E. solve_bot_wfs_dec E (typ_label a B).
 
   *
     simpl in H. destruct IHk with (A:=A) (B:=B) (E:=E).
@@ -1581,8 +2029,105 @@ induction A.
 
     { destruct (a == a0).
       + subst. constructor...
-      + right. intros C. inversion C;subst... }
-    { right. intros C. inversion C;subst... }
+      + right. intros C. inversion C;inv_rt;subst... }
+    { right. intros C. inversion C;inv_rt;subst... }
+
++
+  intros. simpl in H.
+  induction A;intros;try solve [ solve_right_dec]...
+  * solve_bot_dec E.
+
+  * solve_bot_dec E. left. apply Reflexivity...
+
+  * solve_bot_dec E. 
+    solve_bot_wfs_dec E (typ_rcd_cons a A1 A2).
+    left. apply sa_rcd...
+    { apply KeySetProperties.subset_empty. }
+    { intros. inversion H1. }
+
+
++
+intros. 
+induction A;intros;try solve [ solve_right_dec]...
+* solve_bot_dec E. solve_bot_wfs_dec E (typ_rcd_cons a B1 B2).
+
+* solve_bot_dec E. 
+  solve_bot_wfs_dec E (typ_rcd_cons a B1 B2).
+  right. intros C. inversion C. collect_nil H3.
+  
+*
+
+
+
+destruct (subset_dec (collectLabel (typ_rcd_cons a B1 B2)) (collectLabel (typ_rcd_cons a0 A1 A2)) );
+  try solve [ solve_right_dec].
+
+solve_bot_dec E. 
+solve_bot_wfs_dec E (typ_rcd_cons a0 A1 A2).
+solve_bot_wfs_dec E (typ_rcd_cons a B1 B2).
+
+
+destruct (@record_permutation_exists a E (typ_rcd_cons a0 A1 A2)) as [[x e]| e]...
+{ apply s... simpl. apply union_iff. left... }
+
+pose proof (e':=e).
+destruct e'.
+assert (type4rec (typ_rcd_cons a x (dropLabel a (typ_rcd_cons a0 A1 A2)))).
+{ apply type_to_rec. apply WF_type with (E:=E). get_well_form... }
+assert (type4rec (typ_rcd_cons a0 A1 A2)).
+{ apply type_to_rec. apply WF_type with (E:=E). get_well_form... }
+pose proof equiv_measure H2 H3 H0 H1.
+rewrite <- H4 in H.
+
+destruct IHk with (E:=E)
+(A:= x) (B:=B1)...
+{ simpl in H. lia... }
+2:{ right. intros C.
+    pose proof sub_transitivity H0 C.
+    inversion H5;subst.
+    specialize (H12 a x B1).
+    apply n. apply H12;simpl;rewrite eq_dec_refl...
+    }
+
+destruct IHk with (E:=E)
+(B:= B2) (A:=(dropLabel a (typ_rcd_cons a0 A1 A2)))...
+{  simpl in H. simpl. lia... }
+
+-- left.
+    apply sub_transitivity with (typ_rcd_cons a x (dropLabel a (typ_rcd_cons a0 A1 A2)))...
+    apply sa_rcd...
+    { apply label_equiv in e. rewrite e... }
+    { destruct e. get_well_form... }
+    { intros.  simpl in H5. simpl in H6.
+      destruct (a == i).
+      { inversion H5. inversion H6. subst... }
+      { apply (rcd_inversion s1) with (i:=i)...
+        + get_well_form. apply rt_type_drop with (E:=E)...
+        + inversion w0... }
+    }
+
+-- right.
+    intros C.
+    pose proof sub_transitivity H0 C.
+    inversion H5;subst.
+    apply n. apply sa_rcd...
+    { apply rt_type_drop with (E:=E)... }
+    { inversion w0... }
+    { simpl in H9.
+      rewrite <- !KeySetProperties.add_union_singleton in H9.
+      apply dom_add_subset in H9...
+      inversion H10;inversion H11... }
+    { inversion H10... }
+    { inversion H11... }
+    { intros. apply H12 with (i:=i).
+      + simpl. destruct (a == i)... subst i.
+        apply label_belong in H14.
+        inversion H11. exfalso...
+      + simpl. destruct (a == i)... subst i.
+        apply label_belong in H14.
+        inversion H11. exfalso...
+    }
+
 Qed.
 
 

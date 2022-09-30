@@ -1,7 +1,7 @@
 Set Implicit Arguments.
 Require Import Metalib.Metatheory.
 Require Import Program.Equality.
-Require Export Backward.
+Require Export Equiv.
 
 Lemma open_tt_var_rev: forall A B (X:atom),
     X \notin fv_tt A \u fv_tt B ->
@@ -46,6 +46,11 @@ Proof with auto.
     inversion H0.
     apply IHA in H3...
     subst...
+  -
+    inversion H0.
+    apply IHA1 in H3...
+    apply IHA2 in H4...
+    subst...
 Qed.
 
 Lemma binds_split: forall E X U,
@@ -73,11 +78,11 @@ Inductive sub_tvar_chain : env -> env -> atom -> atom -> Prop :=
     wf_env E -> binds X (bind_sub U) E ->
     sub_tvar_chain E (X ~ bind_sub U) X X
 | sub_tvar_cons: forall E1 E2 W (X1 X2 X3:atom),
-    wf_env (E1 ++ X1 ~ bind_sub X2 ++ E2) ->
-    sub_tvar_chain (E1 ++ X1 ~ bind_sub X2 ++ E2) W X2 X3 ->
+    wf_env (E1 ++ X3 ~ bind_sub X2 ++ E2) ->
+    sub_tvar_chain (E1 ++ X3 ~ bind_sub X2 ++ E2) W X1 X2 ->
     sub_tvar_chain 
-      (E1 ++ X1 ~ bind_sub X2 ++ E2) 
-      (X1 ~ bind_sub X2 ++ W) X1 X3.
+      (E1 ++ X3 ~ bind_sub X2 ++ E2) 
+      (X3 ~ bind_sub X2 ++ W) X1 X3.
 
 Lemma sub_tvar_chain_subset: forall E W X Y,
   sub_tvar_chain E W X Y ->
@@ -104,7 +109,7 @@ Proof with auto.
     { inversion x;subst. exfalso.
       apply H1. simpl... }
     { inversion x;subst.
-      specialize (IHsub_tvar_chain Z U (E1 ++ X1 ~ bind_sub X2 ++ E0) JMeq_refl).
+      specialize (IHsub_tvar_chain Z U (E1 ++ X3 ~ bind_sub X2 ++ E0) JMeq_refl).
       eapply sub_tvar_cons...
       rewrite <- app_comm_cons  in H.
       rewrite cons_app_one in H. apply wf_env_cons in H...
@@ -130,16 +135,23 @@ Proof with auto.
     apply IHE with (X:=X)...
     dependent destruction H...
 Qed.
+
+
 Lemma sub_tvar_inv:forall E U (X:atom),
-    sub E U X ->
+    sub E X U ->
     exists Y, U = typ_fvar Y.
 Proof with auto.
   intros.
   dependent induction H...
   exists X...
   exists X0...
+  inv_rt.
 Qed.
-Lemma sub_tvar_next_fvar: forall (X X0:atom) E1 E2 U,
+
+
+
+
+(* Lemma sub_tvar_next_fvar: forall (X X0:atom) E1 E2 U,
    wf_env (E1 ++ [(X, bind_sub U)] ++ E2) ->
    sub (E1 ++ [(X, bind_sub U)] ++ E2) X X0 ->
    X <> X0 ->
@@ -150,7 +162,8 @@ Proof with auto.
   - destruct (sub_tvar_inv H1) as [X' Et]. subst U0.
     assert (binds X (bind_sub U) (E1 ++ [(X, bind_sub U)] ++ E2)) by auto. pose proof binds_uniq _ _ _ H H0 H3. subst U.
     exists X'...
-Qed.
+  - inversion H1.
+Qed. *)
   
 Lemma suba_sub_tvar_chain: forall E (X1 X2:atom),
     sub E X1 X2 ->
@@ -165,10 +178,11 @@ Proof with auto.
     pose proof binds_split _ _ _ H.
     destruct H4 as [E1 [E2 H4]].
     pose proof sub_tvar_inv  H0. destruct H5 as [X' H5]. subst U.
-    specialize (IHsub X' X2 eq_refl eq_refl).
+    specialize (IHsub X1 X' eq_refl eq_refl).
     destruct IHsub as [W IHsub].
-    subst E. exists (X1 ~ bind_sub X' ++ W).
+    subst E. exists (X2 ~ bind_sub X' ++ W).
     eapply sub_tvar_cons with (E2:=E2) (X2:=X')...
+  - inversion H0.
 Qed.
 
 
@@ -305,13 +319,13 @@ Proof with auto.
       subst U0. apply sub_env_cons_some. apply sub_env_nil. }
     { rewrite <- app_assoc in IHsub_tvar_chain.
       rewrite <- app_assoc in IHsub_tvar_chain.
-      replace (E1 ++ (X1, bind_sub X2) :: E3 ++ (X2, bind_sub U) :: E4)
-      with ((E1 ++ (X1, bind_sub X2) :: E3) ++ [(X2, bind_sub U)] ++ E4) in H2.
+      replace (E1 ++ (X3, bind_sub X2) :: E3 ++ (X2, bind_sub U) :: E4)
+      with ((E1 ++ (X3, bind_sub X2) :: E3) ++ [(X2, bind_sub U)] ++ E4) in H2. 
       2:{ rewrite !app_assoc... }
       replace (E0 ++ (X2, bind_sub X4) :: E2) with
       (E0 ++ [(X2, bind_sub X4)] ++ E2) in H2...
       pose proof uniq_from_wf_env H3.
-      pose proof uniq_split_eq _ _ _ _ _ _ _ H5 H2.
+      epose proof uniq_split_eq _ _ _ _ _ _ _ H5 H2.
       destruct_hypos. inversion H7. subst.
       apply sub_env_cons_some.
       apply sub_env_cut_heads in IHsub_tvar_chain...
@@ -321,13 +335,13 @@ Qed.
 
 Lemma sub_tvar_chain_tail_in: forall E W X Y,
   sub_tvar_chain E W X Y ->
-  exists W' T, W = W' ++ Y ~ bind_sub T.
+  exists W' T, W = W' ++ X ~ bind_sub T .
 Proof with auto.
   intros.
   induction H...
   - exists nil, ( U)...
   - destruct IHsub_tvar_chain as [W' [T IH]].
-    exists (X1 ~ bind_sub X2 ++ W'), T.
+    exists (X3 ~ bind_sub X2 ++ W'), T.
     rewrite IH...
 Qed.
 
@@ -352,7 +366,7 @@ Proof with auto.
   inversion H0;subst...
   destruct (X == Y)...
 
-  assert (exists T, binds Y (bind_sub T) E2).
+  assert (exists T, binds X (bind_sub T) E2).
   {
     pose proof sub_tvar_chain_sub_env H.
     apply sub_env_cut_heads in H6.
@@ -362,10 +376,10 @@ Proof with auto.
     destruct W';inversion H7;subst...
     { exfalso... }
     exists T.
-    apply sub_env_binds with (X:=Y) (T:=bind_sub T) in H6...
+    apply sub_env_binds with (X:=X) (T:=bind_sub T) in H6...
   }
 
-  assert (exists T, binds X (bind_sub T) E3).
+  assert (exists T, binds Y (bind_sub T) E3).
   {
     rewrite !cons_app_one in H3. rewrite <- H3 in H0.
     pose proof sub_tvar_chain_sub_env H0.
@@ -376,7 +390,7 @@ Proof with auto.
     destruct W';inversion H8;subst...
     { exfalso... }
     exists T. 
-    apply sub_env_binds with (X:=X) (T:=bind_sub T) in H7...
+    apply sub_env_binds with (X:=Y) (T:=bind_sub T) in H7...
   }
 
   destruct H6. destruct H7.
@@ -400,67 +414,3 @@ Proof with auto.
   apply union_iff. left. apply KeySetFacts.add_iff...
 Qed.
 
-
-Lemma sub_antisymmetry: forall (X Y :typ) E,
-    WF E X ->
-    WF E Y ->
-    sub E X Y ->
-    sub E Y X ->
-    X = Y.
-Proof with auto.
-  intros.
-  generalize dependent Y.
-  dependent induction H;intros...
-  -
-    dependent destruction H1...
-  -
-    dependent induction H0;try solve [inversion H1|inversion H2]...
-    inversion H3.
-  -
-    dependent induction H0;try solve [inversion H2|inversion H3|inversion H4|inversion H5|inversion H6]...
-    destruct (X==X0);subst...
-    assert (Ht:=H).
-    apply binds_split in Ht.
-    destruct_hypos.
-    rename x into E1.
-    rename x0 into E2.
-    rewrite H3 in H.
-
-    apply suba_sub_tvar_chain in H1. destruct H1 as [W1 H1].
-    apply suba_sub_tvar_chain in H2. destruct H2 as [W2 H2].
-    pose proof sub_tvar_chain_antisym H1 H2.
-    rewrite H4...
-
-  -
-    dependent induction H1;try solve [inversion H2|inversion H3|inversion H4|inversion H5]...
-    dependent destruction H2.
-    dependent destruction H3...
-    f_equal...
-  -
-    dependent induction H2;try solve [inversion H2|inversion H3|inversion H4|inversion H5|inversion H6]...
-    dependent destruction H5.
-    dependent destruction H7...
-    f_equal...
-    pick fresh X.
-    specialize_x_and_L X L1.
-    specialize_x_and_L X L2.
-    apply open_tt_var_rev with (X:=X)...
-  -
-    dependent induction H3;try solve [inversion H2|inversion H3|inversion H4|inversion H5|inversion H6]...
-    dependent destruction H7.
-    dependent destruction H10...
-    f_equal...
-    pick fresh X.
-    specialize_x_and_L X L1.
-    specialize_x_and_L X L2.
-    clear H6 H4.
-    apply sub_nominal_inversion in H12...
-    apply sub_nominal_inversion in H9...
-    apply open_tt_var_rev with (X:=X)... 
-  -
-    dependent induction H0;try solve [inversion H2|inversion H3|inversion H4|inversion H5|inversion H1]...
-    dependent destruction H2.
-    dependent destruction H1...
-    f_equal...
-    
-Qed.
