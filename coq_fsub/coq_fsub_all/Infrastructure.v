@@ -26,6 +26,9 @@ Proof with auto.
   unfold open_tt in *.
   pick fresh Y.
   apply open_tt_rec_type_aux with (j:=0) (V:=(typ_fvar Y))...
+  unfold open_tt in *.
+  pick fresh Y.
+  apply open_tt_rec_type_aux with (j:=0) (V:=(typ_fvar Y))...
 Qed.
 
 
@@ -332,16 +335,6 @@ Proof with auto.
 Qed.
 
 
-Lemma subst_tt_rt_type : forall Z P T,
-  rt_type T ->
-  type P ->
-  rt_type (subst_tt Z P T).
-Proof with auto.
-  intros.
-  induction H...
-  constructor...
-Qed.
-
 Lemma subst_tt_type : forall Z P T,
   type T ->
   type P ->
@@ -358,10 +351,10 @@ Proof with auto.
   apply type_all with (L:=L \u {{Z}})...
   intros.
   rewrite subst_tt_open_tt_var...
-  {
-    (* typ_rcd_cons *)
-    constructor... apply subst_tt_rt_type...
-  }
+  pick fresh Y.
+  apply type_all_lb with (L:=L \u {{Z}})...
+  intros.
+  rewrite subst_tt_open_tt_var...
 Qed.
 
 Lemma notin_fv_tt_open : forall X U T,
@@ -411,11 +404,12 @@ Proof with auto.
     apply notin_union in H0.
     destruct H0.
     split...
-  - (* typ_rcd_cons *)
+  -
     simpl in *.
     apply notin_union.
     apply notin_union in H0.
-    destruct H0...
+    destruct H0.
+    split...
 Qed.
 
 Lemma notin_fv_subst: forall X A B,
@@ -446,6 +440,7 @@ Proof with auto.
     apply notin_union in H0.
     destruct H0.
     split...
+
 Qed.
 
 Lemma notin_fv_env: forall E1 E2 X,
@@ -561,325 +556,3 @@ Ltac solve_notin_self X :=
          | [H : X \notin (singleton X) |- _ ] => apply notin_singleton_1 in H;destruct H;auto
          | [H : _ \notin _ \u _ |- _ ] => apply notin_union in H;destruct H
          end. 
-
-
-(* Record *)
-
-
-Lemma union_empty: forall A i,
-    union (singleton i) A [<=] Metatheory.empty -> False.
-Proof with eauto.
-  intros.
-  unfold "[<=]" in H.
-  eapply empty_iff...
-Qed.
-
-Ltac collect_nil H := simpl in H;apply union_empty in H;destruct H.
-
-Lemma label_belong: forall i A B,
-    Tlookup i A = Some B -> i \in collectLabel A.
-Proof with auto.
-  intros.
-  dependent induction A;simpl in *;try solve [inversion H]...
-  destruct (a==i)...
-  apply IHA2 in H...
-Qed.
-
-Lemma label_trans: forall i A B,
-    i \in  A -> A [<=] B -> i \in  B .
-Proof with auto.
-  intros.
-  unfold "[<=]" in H0...
-Qed.
-
-Lemma lookup_some: forall i T,
-    i \in collectLabel T ->
-    exists S, Tlookup i T = Some S.
-Proof with auto.
-  intros.
-  induction T;simpl in *;try solve [apply empty_iff in H;destruct H]...
-  apply AtomSetImpl.union_1 in H...
-  destruct H...
-  apply KeySetFacts.singleton_iff in H.
-  exists T1...
-  destruct (a==i)...
-  destruct n...
-  apply IHT2 in H...
-  destruct H.
-  destruct (a==i)...
-  exists T1...
-  exists x...
-Qed.  
-  
-(* Lemma rcd_types_match : forall S T E i Ti,
-  sub E S T ->
-  Tlookup i T = Some Ti ->
-  exists Si, Tlookup i S = Some Si /\ sub E Si Ti.
-Proof with auto.
-  intros.
-  dependent induction H;simpl in *;try solve [inversion H1|inversion H0|inversion H3]...
-  - specialize (IHsub H1). destruct_hypos.
-  induction H1...
-  simpl in H7;inversion H7.
-  induction H0...
-  simpl in H2.
-  apply union_empty in H2...
-  destruct H2.
-  assert (Ht:=H7).
-  apply label_belong in Ht.
-  apply label_trans with (B:=collectLabel (typ_rcd_cons i1 T0 T3)) in Ht...
-  apply lookup_some in Ht.
-  destruct Ht.
-  specialize (H5 i x Ti H0 H7)...
-  exists x...
-Qed.   *)
-
-Lemma rcd_inversion: forall A B E,
-    sub E A B ->
-    rt_type A ->
-    rt_type B ->
-    (forall i t1 t2, Tlookup i A = Some t1 ->  Tlookup i B = Some t2 -> sub E t1 t2).
-Proof with auto.
-  intros.
-  induction H;try solve [inversion H0|inversion H1]...
-  apply H9 with (i:=i)...
-Qed.
-
-Fixpoint dropLabel (Z : atom) (T : typ) {struct T} : typ :=
-  match T with
-  | typ_bot => typ_bot
-  | typ_nat => typ_nat
-  | typ_bvar J => typ_bvar J
-  | typ_fvar X => typ_fvar X
-  | typ_arrow T1 T2 => typ_arrow (dropLabel Z  T1) (dropLabel Z  T2)
-  | typ_mu T => typ_mu (dropLabel Z  T)
-  | typ_all T1 T2 => typ_all (dropLabel Z  T1) (dropLabel Z  T2)
-  | typ_label i T => typ_label i (dropLabel Z  T)
-  | typ_rcd_nil     => typ_rcd_nil
-  | typ_rcd_cons i T1 T2  => if (i==Z) then (dropLabel Z T2) else (typ_rcd_cons i T1 (dropLabel Z T2))
-  end.
-
-Lemma rt_type_drop: forall E A i,
-    WF E A ->
-    rt_type A -> rt_type (dropLabel i A).
-Proof with auto.
-  intros.
-  induction H;try solve [inversion H0]...
-  simpl.
-  destruct (i0==i)...
-Qed.
-
-Lemma union_subset_x: forall a b c,
-    b [<=] c ->
-    union a b [<=] union a c.
-Proof with auto.
-  intros.
-  apply AtomSetProperties.union_subset_3...
-  apply AtomSetProperties.union_subset_1...
-  apply KeySetProperties.subset_trans with (s2:=c)...
-  apply AtomSetProperties.union_subset_2...
-Qed.
-
-Lemma drop_collect: forall A i,
-    collectLabel A [<=] {{i}} \u collectLabel (dropLabel i A).
-Proof with auto.
-  intros.
-  induction A;simpl;try solve [apply AtomSetProperties.union_subset_2]...
-  destruct (a==i)...
-  subst.
-  apply AtomSetProperties.union_subset_3 with (s:={{i}}) in IHA2...
-  apply AtomSetProperties.union_subset_1.
-  simpl.
-  rewrite <- AtomSetProperties.union_assoc...
-  assert (union (singleton i) (singleton a) [=] {{a}} \u {{i}}).
-  rewrite  KeySetProperties.union_sym...
-  apply KeySetProperties.equal_refl...
-  rewrite H.
-  rewrite  AtomSetProperties.union_assoc...
-  apply union_subset_x...
-Qed.
-
-Lemma drop_coolect_less: forall A i,
-    collectLabel (dropLabel i A) [<=] collectLabel A.
-Proof with auto.
-  intros.
-  induction A;simpl in *;try solve [apply F.Subset_refl]...
-  destruct (a==i)...
-  apply KeySetProperties.subset_trans with (s2:=collectLabel A2)...
-  apply AtomSetProperties.union_subset_2.
-  simpl...
-  apply union_subset_x...
-Qed.
-
-Lemma drop_collect_flip: forall A i,
-    i \in collectLabel A ->
-    {{i}} \u collectLabel (dropLabel i A) [<=] collectLabel A.
-Proof with auto.
-  intros.
-  induction A;simpl in *;try solve [apply KeySetFacts.empty_iff in H;destruct H]...
-  apply F.union_iff in H.
-  destruct H...
-  apply AtomSetImpl.singleton_1 in H...
-  destruct (a==i)...
-  subst.
-  apply union_subset_x...
-  apply drop_coolect_less...
-  destruct n...
-  destruct (a==i)...
-  subst.
-  apply union_subset_x...
-  apply drop_coolect_less...
-  apply IHA2 in H.
-  simpl...
-  rewrite <- AtomSetProperties.union_assoc...
-  assert (union (singleton i) (singleton a) [=] {{a}} \u {{i}}).
-  rewrite  KeySetProperties.union_sym...
-  apply KeySetProperties.equal_refl...
-  rewrite H0.
-  rewrite  AtomSetProperties.union_assoc...
-  apply union_subset_x...
-Qed.
-
-Lemma union_subset_x2: forall a b c,
-    union {{a}} b [<=] union {{a}} c ->
-    a \notin b ->
-    b [<=] c.
-Proof with auto.
-  intros.
-  unfold "[<=]" in *.
-  intros.
-  assert (Ht:=H1).
-  apply AtomSetImpl.union_3 with (s:={{a}}) in Ht.
-  specialize (H _ Ht).
-  apply AtomSetImpl.union_1 in H.
-  destruct H...
-  apply AtomSetImpl.singleton_1 in H...
-  subst.
-  assert (False).
-  apply H0...
-  destruct H.
-Qed.
-
-Lemma open_tt_drop_var: forall A (X i : atom)  k,
-    (open_tt_rec k X (dropLabel i A) ) = dropLabel i (open_tt_rec k X A).
-Proof with auto.
-  intro.
-  induction A;intros;simpl in *;try solve [f_equal;auto]...
-  destruct (k==n)...
-  destruct (a==i)...
-  simpl.
-  f_equal...
-Qed.
-
-
-Lemma subst_tt_collect: forall T E i X A,
-    i `notin` collectLabel T ->
-    rt_type T ->
-    WF E T ->
-    i `notin` collectLabel (subst_tt X A T).
-Proof with auto.
-  intros.
-  induction H1;try solve [inversion H0]...
-  simpl in *.
-  apply notin_union in H.
-  destruct H.
-  apply notin_union.
-  split...
-Qed.  
-  
-
-Lemma notin_drop_fv: forall X A i,
-    X \notin fv_tt A ->
-    X `notin` fv_tt (dropLabel i A).
-Proof with auto.
-  intros.
-  induction A;simpl in *...
-  destruct (a==i)...
-Qed.
-
-Lemma notin_drop_collect: forall X A i,
-    X \notin collectLabel A ->
-    X `notin` collectLabel (dropLabel i A).
-Proof with auto.
-  intros.
-  induction A;simpl in *...
-  destruct (a==i)...
-Qed.
-
-Lemma notin_drop_collect_self: forall  A i,
-    i \notin collectLabel A ->
-   collectLabel A [=] collectLabel (dropLabel i A).
-Proof with auto.
-  intros.
-  induction A;simpl in *;try solve [apply KeySetProperties.equal_refl]...
-  destruct (a==i)...
-  apply notin_union in H.
-  destruct H.
-  subst.
-  apply notin_singleton_1 in H.
-  destruct H...
-  simpl...
-  apply notin_union in H.
-  destruct H...
-  apply KeySetProperties.union_equal_2...
-Qed.
-
-Lemma notin_drop_self: forall j A,
-    j `notin` collectLabel (dropLabel j A).
-Proof with auto.
-  intros.
-  induction A...
-  simpl.
-  destruct (a==j)...
-Qed.
-
-
-Lemma Tlookup_drop:forall i j T A,
-    Tlookup j (dropLabel i A) = Some T ->
-    Tlookup j A = Some T.
-Proof with auto.
-  intros.
-  induction A;simpl in *;try solve [inversion H]...
-  destruct (a==i)...
-  destruct (a==j)...
-  subst.
-  apply label_belong in H.
-  assert (j `notin` collectLabel (dropLabel j A2)).
-  apply notin_drop_self...
-  assert (False).
-  apply H0...
-  destruct H1.
-  simpl in H.
-  destruct (a==j)...
-Qed.
-
-Lemma Tlookup_drop_flip: forall i A j t,
-    Tlookup i A = Some t ->
-    i <> j ->
-    Tlookup i (dropLabel j A) = Some t.
-Proof with auto.
-  intros.
-  induction A;simpl in *;try solve [inversion H]...
-  destruct (a==i)...
-  destruct (a==j)...
-  subst.
-  destruct H0...
-  simpl.
-  destruct (a==i)...
-  destruct n0...
-  destruct (a==j)...
-  simpl...
-  destruct (a==i)...
-  destruct n...
-Qed.  
-
-Lemma Tlookup_fv_tt: forall i A t,
-  Tlookup i A = Some t ->
-  fv_tt t [<=] fv_tt A.
-Proof with auto.
-  intros. induction A;try solve [inversion H]...
-  - simpl in *. destruct (a==i)...
-    + inversion H... intro x. intros. apply union_iff...
-    + apply IHA2 in H. intro x. intros. apply union_iff...
-Qed.
-  

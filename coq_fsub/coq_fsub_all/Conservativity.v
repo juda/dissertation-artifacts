@@ -43,7 +43,7 @@ Module ExtDefs.
 
 Inductive typ_ext : Fsub.typ -> typ -> Prop :=
 | typ_ext_nat : typ_ext Fsub.typ_nat typ_nat
-| typ_ext_bot : typ_ext Fsub.typ_bot typ_bot
+| typ_ext_top : typ_ext Fsub.typ_top typ_top
 | typ_ext_bvar : forall (n : nat),
     typ_ext (Fsub.typ_bvar n) (typ_bvar n)
 | typ_ext_fvar : forall (x : atom),
@@ -100,11 +100,14 @@ Inductive env_ext: Fsub.env -> env -> Prop :=
 
 Hint Constructors typ_ext exp_ext binding_ext env_ext.
 
+
 Ltac inv_rt :=
-  try (solve
+  (* try (solve
    [ repeat match goal with
 	        | H:rt_type ?T |- _ => inversion H; clear H
-            end ]).
+            end ]). *)
+    (* try solve [exfalso;eapply bind_sub_conserv_lb;eauto]; *)
+            idtac.
 
 Ltac inv H := inversion H; subst;inv_rt.
 
@@ -149,6 +152,33 @@ Qed.
 
 
 End ExtDefs.
+
+
+
+Theorem bind_sub_conserv_lb: forall E E' X U,
+ExtDefs.env_ext E E' ->
+binds X (bind_sub_lb U) E' ->
+False.
+Proof with auto.
+  intros.
+  induction H.
+  - inv H0.
+  - inv H0.
+    + inv H2. inv H1.
+    + apply IHenv_ext in H2. destruct H2.
+Qed. 
+
+
+Ltac inv_rt :=
+  (* try (solve
+   [ repeat match goal with
+	        | H:rt_type ?T |- _ => inversion H; clear H
+            end ]). *)
+    try solve [exfalso;eapply bind_sub_conserv_lb;eauto];
+            idtac.
+
+Ltac inv H := inversion H; subst;inv_rt.
+
 
 Lemma env_ext_dom : forall { E E' },
   ExtDefs.env_ext E E' -> dom E = dom E'.
@@ -341,11 +371,11 @@ Proof with auto.
     apply sa_fvar. 
     eapply wf_env_conserv;eassumption...
     eapply wf_conserv;eassumption...
-  - inv H2.
-    apply sa_bot.
+  - inv H1.
+    apply sa_top.
     eapply wf_env_conserv;eassumption...
     eapply wf_conserv;eassumption...
-  - inv H1...
+  - inv H0...
     eapply bind_sub_conserv in H;try eassumption...
     destruct H as [? [? ?]].
     eapply sa_trans_tvar...
@@ -466,6 +496,7 @@ Proof with auto.
       exists U'...
 Qed. 
 
+
 Theorem wf_conserv:
 forall E' T',
 WF E' T' -> 
@@ -478,20 +509,23 @@ Proof with auto.
   induction H0;intros. 
   - inversion H0...
   - inversion H0...
+  - inversion H0... 
   - inversion H1;subst...
     eapply bind_sub_conserv in H;eauto.
     destruct H as [U' [? ?]]...
     apply Fsub.WF_var with (U:=U')...
+  - exfalso. eapply bind_sub_conserv_lb;eassumption.
   - inv H0...
   - inv H3... apply Fsub.WF_all with (L:=L)...
     intros. specialize_x_and_L X L.
     apply H1...
     { constructor... }
     { apply open_tt_conserv... }
+  - inv H3.
   - inv H4.
   - inv H1.
-  - inv H0.
-  - inv H2.
+  (* - inv H0.
+  - inv H2. *)
 Qed.
 
 
@@ -510,11 +544,23 @@ Proof with auto.
     { eapply wf_conserv;eassumption. }
     { rewrite  (env_ext_dom H6)... }
   - inv H2. inv H8.
+  - inv H2. inv H8.
     rewrite_env ([(x, Fsub.bind_typ T0)] ++ E1).
     constructor...
     { eapply wf_conserv;eassumption. }
     { rewrite (env_ext_dom H6)... }
 Qed.
+
+Lemma sub_bot_ex: forall E (X:atom),
+  sub E X typ_bot ->
+  exists X', binds X' (bind_sub typ_bot) E.
+Proof.
+  intros. dependent induction H...
+  inversion H0;subst.
+  + exists X. auto.
+  + apply IHsub with (X:=X0);auto.
+Qed.
+
 
 Theorem sub_antisym:
   forall E S1 S2,
@@ -532,13 +578,15 @@ Proof with auto.
   dependent induction Hwf1;intros...
   -
     inv H2...
-    dependent destruction H0;inv_rt...
+    dependent destruction H;inv_rt...
     { inv H4... }
+  -
+    inv H2...
   -
     dependent induction H;try solve [inversion H1;inv_rt|inversion H2;inv_rt]...
     inv H2. inv H3...
   -
-    dependent induction H0;try solve [inversion H2;inv_rt|
+    dependent induction H1;try solve [inversion H2;inv_rt|
     inversion H3;inv_rt|
     inversion H4;inv_rt|inversion H5;inv_rt|
     inversion H6;inv_rt]...
@@ -550,15 +598,40 @@ Proof with auto.
     destruct_hypos.
     rename x into E1.
     rename x0 into E2.
-    rewrite H6 in H2.
+    rewrite H6 in H0.
 
-    apply suba_sub_tvar_chain in H2. destruct H2 as [W1 H2].
-    assert (sub E X X0). { apply sa_trans_tvar with (U:=U0)... }
-    rewrite H6 in H7.
-    apply suba_sub_tvar_chain in H7. destruct H7 as [W2 H7].
-    pose proof sub_tvar_chain_antisym H2 H7.
-    inv H5...
-
+    apply suba_sub_tvar_chain in H0. destruct H0 as [[W1 H0]|H0].
+    + assert (sub E X0 X). { apply sa_trans_tvar with (U:=U0)... }
+      rewrite H6 in H7.
+      apply suba_sub_tvar_chain in H7. 
+      destruct H7 as [[W2 H7]|H7].
+      { pose proof sub_tvar_chain_antisym H0 H7.
+        inv H5... }
+      { destruct H7 as [?|[?|[?|?]]].
+        * destruct H7. inv H7.
+          simpl in *. rewrite <- H8 in *.
+          assert (binds X (bind_sub_lb X2) 
+            (E0 ++ (X, bind_sub_lb X2) :: E3))...
+          inv_rt.
+        * destruct H7 as [? [? [? ?]]]. rewrite H6 in *. inv_rt.
+        * inv H7.
+        * subst E. apply sub_bot_ex in H7. destruct_hypos.
+          apply bind_sub_conserv with (E:=E') in H6...
+          destruct_hypos. inv H7.
+       }
+    + destruct H0 as [?|[?|[?|?]]].
+      * destruct H0. inv H0.
+        simpl in *. rewrite <- H7 in *.
+        assert (binds X (bind_sub_lb X2) 
+          (E0 ++ (X, bind_sub_lb X2) :: E3))...
+        inv_rt.
+      * destruct H0 as [? [? [? ?]]]. rewrite H6 in *. inv_rt.
+      * inv H0.
+      * subst E. apply sub_bot_ex in H0. destruct_hypos.
+        apply bind_sub_conserv with (E:=E') in H0...
+        destruct_hypos. inv H6.
+  -
+    inv_rt.
   -
     dependent induction H;try solve [inversion H2;inv_rt|
     inversion H3;inv_rt|
@@ -594,15 +667,17 @@ Proof with auto.
       * add_nil. apply sub_narrowing with (Q:=S2)...
       * constructor...
       * apply open_tt_conserv...
-      * apply open_tt_conserv... 
+      * apply open_tt_conserv...
+  -
+    inv H4. 
   -
     inv H6.
   -
     inv H2.
-  -
+  (* -
     inv H2.
   -
-    inv H4.
+    inv H4. *)
 Qed.
 
 
@@ -625,16 +700,18 @@ Proof with auto.
     apply Fsub.sa_fvar. 
     eapply wf_env_conserv;eassumption...
     eapply wf_conserv;eassumption...
-  - inv H2.
-    apply Fsub.sa_bot.
+  - inv H1.
+    apply Fsub.sa_top.
     eapply wf_env_conserv;eassumption...
     eapply wf_conserv;eassumption...
-  - inv H1...
+  - inv H2.
+  - inv H0...
     eapply bind_sub_conserv in H;try eassumption...
     destruct H as [? [? ?]].
     eapply Fsub.sa_trans_tvar...
     { apply H... }
     { apply IHsub... }
+  - inv_rt.
   - inv H1... inv H0...
   - inv H2... inv H1...
     assert (T4 = T3).
@@ -651,9 +728,10 @@ Proof with auto.
       { apply open_tt_conserv... }
       { constructor... }
     }
+  - inv H1...
   - inv H3...
   - inv H0...
-  - destruct H0;inv H8.
+  (* - destruct H0;inv H8. *)
 Qed.
 
 
@@ -676,26 +754,43 @@ Lemma exposure_ext_ex2:
 forall E E' t t' s',
   ExtDefs.env_ext E E' ->
   ExtDefs.typ_ext t t' ->
-  Algo.exposure2 E' s' t' ->
+  Algo.exposure E' t' s' ->
   exists s, ExtDefs.typ_ext s s'.
 Proof with auto.
   intros. generalize dependent E.
   generalize dependent t.
   induction H1;intros.
   - exists Fsub.typ_nat...
-  - exists Fsub.typ_bot...
+  - exists Fsub.typ_top...
+  - inv H0.
   - inv H0. destruct (typ_ext_env_ex _ _ H2 H) as [U' ?].
     destruct_hypos. 
-    destruct IHexposure2 with (t:=U') (E0:=E0)...
+    destruct IHexposure with (t:=U') (E0:=E0)...
     exists x...
+  - inv_rt.
   - inv H0... exists (Fsub.typ_arrow T1 T2)...
   - inv H0. exists (Fsub.typ_all T1 T2)...
   - inv H0.
   - inv H0.
-  - inv H.
+  - inv H0.
+  (* - inv H.
     + inv H0.
-    + inv H0.
+    + inv H0. *)
 Qed.
+
+Lemma exposure_lb_false_ext: forall E T' T T11 T12 E0,
+  Algo.exposure E T (typ_all_lb T11 T12) ->
+  ExtDefs.typ_ext T' T ->
+  ExtDefs.env_ext E0 E ->
+  False.
+Proof with auto.
+  intros. generalize dependent T'. dependent induction H;intros...
+  - pose proof bind_sub_conserv _ _ H1 H.
+    destruct_hypos.
+    apply (IHexposure T11 T12) with (T':=x)...
+  - inv H0. 
+Qed.
+
 
 Lemma typ_ext_ex2:
 forall E E' e e' t',
@@ -745,26 +840,25 @@ Proof with auto.
     destruct IHtyping1 with (e:=e0) (E0:=E0) as [T1' [? ?]]...
     destruct IHtyping2 with (e:=e3) (E0:=E0) as [T2' [? ?]]...
     pose proof (Algo.typing_regular H1_). destruct_hypos.
-    inv H;inv_rt. inv H4.
-    (* destruct (exposure_ext_ex2 H2 H4 H) as [Tarr' ?]. *)
-    (* inv H12.  *)
-    (* apply Algo.exposure_sound in H... *)
-    (* pose proof sub_conserv H2 H4 H12 H. *)
-    
-    exists T0.
+    destruct (exposure_ext_ex2 H2 H4 H) as [Tarr' ?].
+    inv H12. 
+    apply Algo.exposure_sound in H...
+    pose proof sub_conserv H2 H4 H12 H.
+    exists T3.
     split...
-    + apply Fsub.typing_app with (T1:=T1)...
+    + apply Fsub.typing_app with (T1:=T0)...
+      { eapply Fsub.typing_sub with (S:=T1')... }
       { apply Fsub.typing_sub with (S:=T2')...
-        eapply sub_conserv;[..|apply H0]... } 
-  - inv H0. exists Fsub.typ_bot. split...
-    destruct IHtyping1 with (e:=e0) (E0:=E0) as [T1' [? ?]]...
-    destruct IHtyping2 with (e:=e3) (E0:=E0) as [T2' [? ?]]...
-    inv H2. apply Fsub.typing_app with (T1:=T2')...
-    eapply Fsub.typing_sub;[apply H1|].
-    pose proof (Algo.typing_regular H1_0). destruct_hypos.
-    constructor...
-    eapply wf_env_conserv; eassumption. constructor...
-    eapply wf_conserv;eassumption.
+        pose proof sub_conserv H2 H8 H16 H0... }
+  - pose proof (Algo.typing_regular H1_). destruct_hypos.
+    apply Algo.exposure_sound in H...
+    inversion H;subst.
+    + inv H0.
+      destruct (IHtyping1) with (e:=e0) (E0:=E0)...
+      destruct_hypos. inv H8.
+    + apply sub_bot_ex in H. destruct H.
+      apply bind_sub_conserv with (E:=E0) in H...
+      destruct_hypos. inv H7.
   - inv H1.
     pick_fresh X.
     specialize_x_and_L X L.
@@ -799,30 +893,36 @@ Proof with auto.
       + constructor...
         apply open_close_tt_conserv...
     }
+  - inv H1.
   - inv H2.
-    destruct IHtyping with (e:=e0) (E0:=E0) as [T1' [? ?]]...
-    inv H;inv_rt. inv H5.
-    exists (Fsub.open_tt T0 T). split...
-    2:{ apply open_tt_conserv... }
-    apply Fsub.typing_tapp with (T1:=T1)...
-    { pose proof (Algo.typing_regular H1). destruct_hypos.
-      eapply sub_conserv;[..|apply H0]...
+    destruct IHtyping with (e:=e0) (E0:=E0) as [Tall' [? ?]]...
+    destruct (exposure_ext_ex2 H3 H5 H) as [Tall'' ?].
+    inv H6.
+    exists (Fsub.open_tt T3 T). split...
+    2:{ eapply open_tt_conserv... }
+    apply Fsub.typing_tapp with (T1:=T0)...
+    { apply Fsub.typing_sub with (S:=Tall')... 
+      pose proof (Algo.typing_regular H1). destruct_hypos.
+      apply Algo.exposure_sound in H...
+      eapply sub_conserv;[..|apply H]...
     }
-  - inv H0.
-    destruct IHtyping with (e:=e0) (E0:=E0) as [T1' [? ?]]...
-    inv H4.
-    exists (Fsub.typ_bot). split...
-    replace Fsub.typ_bot with (Fsub.open_tt Fsub.typ_bot T)... 
-    apply Fsub.typing_tapp with (T1:=T)...
-    { eapply Fsub.typing_sub with (S:=Fsub.typ_bot)...
-      apply Fsub.typing_regular in H3... destruct_hypos.
-      constructor... apply Fsub.WF_all with (L:={})... eapply wf_conserv;eassumption.
-    }
-    { assert (sub E T2 T2). { apply Reflexivity... apply Algo.typing_regular in H1. destruct_hypos... }
-      eapply sub_conserv;eassumption. }
+    { eapply sub_conserv;[..|apply H0]... }
+  - exfalso.
+    inv H2. 
+    destruct IHtyping with (e:=e0) (E0:=E0) as [Tall' [? ?]]...
+    eapply exposure_lb_false_ext;eauto.
+  - pose proof (Algo.typing_regular H1). destruct_hypos.
+    apply Algo.exposure_sound in H...
+    inversion H;subst.
+    + inv H2. destruct (IHtyping) with (e:=e0) (E0:=E0)...
+      destruct_hypos. inv H10.
+    + apply sub_bot_ex in H. destruct H.
+      apply bind_sub_conserv with (E:=E0) in H...
+      destruct_hypos. inv H9.
   - inv H3.
   - inv H2.
-  - inv H0.
+  - inv H2.
+  - inv H2.
     (* destruct IHtyping with (e0:=e1) (E:=E) as [Trcd' [? ?]]...
     destruct (exposure_ext_ex2 H3 H5 H) as [Trcd'' ?].
     epose proof Tlookup_conserv H7 H0.
@@ -833,11 +933,10 @@ Proof with auto.
       pose proof (Algo.typing_regular H1). destruct_hypos.
       apply Algo.exposure_sound in H...
       eapply sub_conserv;[..|apply H]... *)
-  - inv H0.
+  (* - inv H0. *)
    (* exists Fsub.typ_rcd_nil. split...
     constructor... apply wf_env_conserv with (E':=G)... *)
-  - inv H0.
-  - inv H2.
+  (* - inv H2.  *)
     (* destruct IHtyping1 with (e:=e0) (E:=E) as [T1' [? ?]]...
     destruct IHtyping2 with (e:=e3) (E:=E) as [T2' [? ?]]...
     exists (Fsub.typ_rcd_cons i T1' T2')...
@@ -880,25 +979,20 @@ Proof with auto.
   - inv H2.
     destruct (typ_ext_ex2 H3 H7 H2_)
     as [T1' [? ?]].
-    (* destruct (exposure_ext_ex2 H3 H5 H) as [Tarr' ?]. *)
-    inv H;inv_rt. inv H5.
-    rewrite (ExtDefs.typ_ext_inj2 H12 H1) in *...
-    apply Fsub.typing_app with (T1:=T1)...
+    destruct (exposure_ext_ex2 H3 H5 H) as [Tarr' ?].
+    inv H6.
+    rewrite (ExtDefs.typ_ext_inj2 H13 H1) in *...
+    apply Fsub.typing_app with (T1:=T0).
+    { apply Fsub.typing_sub with (S:=T1')...
+      pose proof (Algo.typing_regular H2_). destruct_hypos.
+      apply Algo.exposure_sound in H...
+      eapply sub_conserv;[..|apply H]...
+    }
     { destruct (typ_ext_ex2 H3 H8 H2_0) as [T2' ?].
       destruct_hypos.
       apply Fsub.typing_sub with (S:=T2')...
       eapply sub_conserv;[..|apply H0]... }
-  -
-    inv H0. inv H1.
-    destruct (typ_ext_ex2 H H6 H2_0)
-    as [T2' [? ?]].
-    apply Fsub.typing_app with (T1:=T2')...
-    { apply Fsub.typing_sub with (S:=Fsub.typ_bot)...
-      apply (Algo.typing_regular) in H2_0. destruct_hypos.
-      constructor...
-      eapply wf_env_conserv;eassumption.
-      constructor...
-      eapply wf_conserv;eassumption. }
+  - inv H1.
   - inv H1. inv H2.
     rewrite (ExtDefs.typ_ext_inj2 H9 H7) in *...
     apply Fsub.typing_tabs with (L:=L).
@@ -907,56 +1001,50 @@ Proof with auto.
     { apply open_tt_conserv... }
     { apply open_te_conserv... }
     { constructor... }
+  - inv H2.
   - inv H3.
     destruct (typ_ext_ex2 H4 H8 H2) as [Tall' [? ?]].
-    (* destruct (exposure_ext_ex2 H4 H6 H) as [Tall'' ?]. *)
-    inv H;inv_rt. inv H6.
-    pose proof open_tt_conserv H13 H9 0.
-    rewrite (ExtDefs.typ_ext_inj2 H1 H7) in *...
-    apply Fsub.typing_tapp with (T1:=T1)...
-    { eapply sub_conserv;[..|apply H0]... }
-  - inv H1. inv H0.
-    replace (Fsub.typ_bot) with (Fsub.open_tt Fsub.typ_bot T)...
-    apply Fsub.typing_tapp with (T1:=T)...
-    { eapply Fsub.typing_sub with (S:=Fsub.typ_bot)...
-      apply Algo.typing_regular in H2. destruct_hypos.
-      constructor...
-      eapply wf_env_conserv;eassumption.
-      apply Fsub.WF_all with (L:={})...
-      eapply wf_conserv;eassumption.
+    destruct (exposure_ext_ex2 H4 H6 H) as [Tall'' ?].
+    inv H7.
+    pose proof open_tt_conserv H14 H9 0.
+    rewrite (ExtDefs.typ_ext_inj2 H1 H10) in *...
+    apply Fsub.typing_tapp with (T1:=T0)...
+    { eapply Fsub.typing_sub with (S:=Tall')...
+      pose proof (Algo.typing_regular H2). destruct_hypos.
+      apply Algo.exposure_sound in H...
+      eapply sub_conserv;[..|apply H]...
     }
-    { eapply sub_conserv;try eassumption...
-      apply Reflexivity... 
-      apply Algo.typing_regular in H2. destruct_hypos... }
-
+    { eapply sub_conserv;[..|apply H0]... }
+  - inv H3.
+    destruct (typ_ext_ex2 H4 H8 H2) as [Tall' [? ?]].
+    destruct (exposure_ext_ex2 H4 H6 H) as [Tall'' ?].
+    inv H7.
+  - inv H1.
   - inv H4.
   - inv H3.
 
   
-  - inv H0.
-    (* destruct (typ_ext_ex2 H3 H6 H2) as [Trcd' ?]. destruct_hypos.
-    (* destruct (exposure_ext_ex2 H4 H6 H) as [Trcd'' ?]. *)
-    epose proof Tlookup_conserv H5 H.
-    destruct H7 as [Ti']. destruct_hypos.
-    rewrite (ExtDefs.typ_ext_inj2 H1 H8) in *.
-    apply Fsub.typing_proj with (T:=Trcd')... *)
-  - inv H1. inv H0.
-    (* eapply Fsub.typing_proj with (T:=(Fsub.typ_rcd_cons i Fsub.typ_bot Fsub.typ_rcd_nil))...
-    { eapply Fsub.typing_sub with (S:=Fsub.typ_bot)...
-      apply Algo.typing_regular in H2. destruct_hypos.
-      constructor...
-      eapply wf_env_conserv;eassumption.
-    }
-    { simpl. destruct (i==i)... exfalso... } *)
-  - inv H1. 
-  (* inv H0. constructor.
+  - inv H3.
+  - inv H1.
+    (* destruct (typ_ext_ex2 H4 H7 H2) as [Trcd' ?]. destruct_hypos.
+    destruct (exposure_ext_ex2 H4 H6 H) as [Trcd'' ?].
+    epose proof Tlookup_conserv H8 H0.
+    destruct H9 as [Ti']. destruct_hypos.
+    rewrite (ExtDefs.typ_ext_inj2 H1 H10) in *.
+    apply Fsub.typing_proj with (T:=Trcd'')...
+    apply Fsub.typing_sub with (S:=Trcd')...
+    pose proof (Algo.typing_regular H2). destruct_hypos.
+    apply Algo.exposure_sound in H...
+    eapply sub_conserv;[..|apply H]... *)
+  (* - inv H1. *)
+   (* inv H0. constructor.
     apply wf_env_conserv with (E':=G)... *)
-  - inv H2.
+  (* - inv H2. *)
    (* inv H3. constructor...
     + apply rt_type_conserv in H10. tauto.
     + apply rt_expr_conserv in H12. tauto.
     + apply collectLabele_conserv in H12...
-      rewrite H12... *) 
+      rewrite H12... *)
 Qed.
 
 

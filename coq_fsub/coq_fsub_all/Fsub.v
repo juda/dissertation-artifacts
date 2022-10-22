@@ -14,13 +14,11 @@ Module Fsub.
 
 Inductive typ : Set :=
   | typ_nat : typ
-  | typ_bot : typ
+  | typ_top : typ
   | typ_bvar : nat -> typ
   | typ_fvar : var -> typ
   | typ_arrow : typ -> typ -> typ
   | typ_all : typ -> typ -> typ
-  | typ_rcd_nil : typ
-  | typ_rcd_cons : var -> typ -> typ -> typ       
 .
 
 
@@ -32,9 +30,6 @@ Inductive exp : Set :=
   | exp_tabs : typ -> exp -> exp
   | exp_tapp : exp -> typ -> exp
   | exp_nat : exp
-  | exp_rcd_nil : exp
-  | exp_rcd_cons : var -> exp -> exp -> exp
-  | exp_rcd_proj : exp -> var -> exp
 .
 
 Coercion exp_bvar : nat >-> exp.
@@ -43,28 +38,19 @@ Coercion exp_fvar : atom >-> exp.
 Fixpoint open_tt_rec (K : nat) (U : typ) (T : typ) {struct T} : typ :=
   match T with
   | typ_nat         => typ_nat      
-  | typ_bot         => typ_bot
+  | typ_top         => typ_top
   | typ_bvar J      => if K === J then U else (typ_bvar J)
   | typ_fvar X      => typ_fvar X 
   | typ_arrow T1 T2 => typ_arrow (open_tt_rec K U T1) (open_tt_rec K U T2)
   | typ_all T1 T2 => typ_all (open_tt_rec K U T1) (open_tt_rec (S K) U T2)
-  | typ_rcd_nil     => typ_rcd_nil
-  | typ_rcd_cons i T1 T2  => typ_rcd_cons i (open_tt_rec K U T1) (open_tt_rec K U T2)
   end.
 
 
 Definition open_tt T U := open_tt_rec 0 U T.
 
-Inductive rt_type : typ -> Prop :=
-  | rt_type_rcd_nil :
-      rt_type typ_rcd_nil
-  | rt_type_rcd_cons : forall i T1 T2,
-      rt_type (typ_rcd_cons i T1 T2)
-.
-
 Inductive type : typ -> Prop :=
-  | type_bot :
-      type typ_bot
+  | type_top :
+      type typ_top
   | type_nat :
       type typ_nat
   | type_var : forall X,
@@ -77,39 +63,28 @@ Inductive type : typ -> Prop :=
       type T1 ->
       (forall X, X `notin` L -> type (open_tt T2 (typ_fvar X))) ->
       type (typ_all T1 T2)
-  | type_rcd_nil :
-      type typ_rcd_nil
-  | type_rcd_cons : forall i T1 T2,
-      type T1 ->
-      type T2 ->
-      rt_type T2 ->
-      type (typ_rcd_cons i T1 T2)
 .
 
 
 
 Fixpoint subst_tt (Z : atom) (U : typ) (T : typ) {struct T} : typ :=
   match T with
-  | typ_bot => typ_bot
+  | typ_top => typ_top
   | typ_nat => typ_nat
   | typ_bvar J => typ_bvar J
   | typ_fvar X => if X == Z then U else (typ_fvar X)
   | typ_arrow T1 T2 => typ_arrow (subst_tt Z U T1) (subst_tt Z U T2)
-  | typ_all T1 T2 => typ_all (subst_tt Z U T1) (subst_tt Z U T2) 
-  | typ_rcd_nil     => typ_rcd_nil
-  | typ_rcd_cons i T1 T2  => typ_rcd_cons i (subst_tt Z U T1) (subst_tt Z U T2)                   
+  | typ_all T1 T2 => typ_all (subst_tt Z U T1) (subst_tt Z U T2)                    
   end.
 
 Fixpoint fv_tt (T : typ) {struct T} : atoms :=
   match T with
-  | typ_bot => {}
+  | typ_top => {}
   | typ_nat => {}
   | typ_bvar J => {}
   | typ_fvar X => {{ X }}
   | typ_arrow T1 T2 => (fv_tt T1) `union` (fv_tt T2)
   | typ_all T1 T2 => (fv_tt T1) `union` (fv_tt T2)
-  | typ_rcd_nil     => {}
-  | typ_rcd_cons i T1 T2  => fv_tt T1 \u fv_tt T2
 end.
 
 Inductive binding : Set :=
@@ -120,24 +95,11 @@ Definition env := list (atom * binding).
 Notation empty := (@nil (atom * binding)).
 
 
-Fixpoint Tlookup (i':var) (Tr:typ) : option typ :=
-  match Tr with
-  | (typ_rcd_cons i T1 T2) =>
-      if i == i' then Some T1 else Tlookup i' T2
-  | _ => None
-  end.
-
-Fixpoint collectLabel (T : typ) : atoms :=
-  match T with
-  | (typ_rcd_cons i T1 T2) => {{i}} \u collectLabel T2
-  | _ => {}
-  end.
-
 Coercion typ_bvar : nat >-> typ.
 Coercion typ_fvar : atom >-> typ.
 
 Inductive WF : env -> typ -> Prop :=
-| WF_bot : forall E, WF E typ_bot
+| WF_top : forall E, WF E typ_top
 | WF_nat : forall E, WF E typ_nat
 | WF_var: forall U E (X : atom),
       binds X (bind_sub U) E ->
@@ -151,26 +113,16 @@ Inductive WF : env -> typ -> Prop :=
       (forall X : atom, X `notin` L ->
         WF (X ~ bind_sub T1 ++ E) (open_tt T2 X)) ->
       WF E (typ_all T1 T2)
-| WF_rcd_nil : forall E,
-      WF E typ_rcd_nil
-| WF_rcd_cons : forall E i T1 T2,
-      WF E T1 ->
-      WF E T2 ->
-      rt_type T2 ->
-      i \notin (collectLabel T2) ->
-      WF E (typ_rcd_cons i T1 T2)
 .
 
 Fixpoint fl_tt (T : typ) {struct T} : atoms :=
   match T with
-  | typ_bot => {}
+  | typ_top => {}
   | typ_nat => {}
   | typ_bvar J => {}
   | typ_fvar X => {}
   | typ_arrow T1 T2 => (fl_tt T1) `union` (fl_tt T2)
   | typ_all T1 T2 => (fl_tt T1) \u (fl_tt T2)
-  | typ_rcd_nil     => {}
-  | typ_rcd_cons i T1 T2  => {{i}} \u fl_tt T1 \u fl_tt T2
   end.
 
 Fixpoint fv_env (E:env) : atoms :=
@@ -209,32 +161,23 @@ Inductive sub : env -> typ -> typ -> Prop :=
     wf_env E ->
     WF E (typ_fvar X) ->
     sub E (typ_fvar X) (typ_fvar X)
-| sa_bot : forall E A,
+| sa_top : forall E A,
     wf_env E ->
     WF E A -> 
-    sub E typ_bot A
+    sub E A typ_top
 | sa_trans_tvar : forall U E T X,
       binds X (bind_sub U) E ->
-      sub E T U ->
-      sub E T (typ_fvar X)
+      sub E U T ->
+      sub E (typ_fvar X) T
 | sa_arrow: forall E A1 A2 B1 B2,
     sub E B1 A1 ->
     sub E A2 B2 ->
     sub E (typ_arrow A1 A2) (typ_arrow B1 B2)
-| sa_all : forall L E S1 S2 T1 T2,
-    sub E S1 S2 ->
-    sub E S2 S1 ->
+| sa_all : forall L E S T1 T2,
+    WF E S ->
       (forall X : atom, X `notin` L ->
-          sub (X ~ bind_sub S2 ++ E) (open_tt T1 X) (open_tt T2 X)) ->
-      sub E (typ_all S1 T1) (typ_all S2 T2)
-| sa_rcd: forall A1 A2 E,
-    wf_env E ->
-    rt_type A1 ->
-    rt_type A2 ->
-    collectLabel A2 [<=] collectLabel A1 ->
-    WF E A1 -> WF E A2 ->
-    (forall i t1 t2, Tlookup i A1 = Some t1 ->  Tlookup i A2 = Some t2 -> sub E t1 t2) ->
-    sub E A1 A2
+          sub (X ~ bind_sub S ++ E) (open_tt T1 X) (open_tt T2 X)) ->
+      sub E (typ_all S T1) (typ_all S T2)
 .
 
 
@@ -253,9 +196,6 @@ Fixpoint open_te_rec (K : nat) (U : typ) (e : exp) {struct e} : exp :=
   | exp_app e1 e2 => exp_app  (open_te_rec K U e1) (open_te_rec K U e2)
   | exp_tabs V e1 => exp_tabs (open_tt_rec K U V)  (open_te_rec (S K) U e1)
   | exp_tapp e1 V => exp_tapp (open_te_rec K U e1) (open_tt_rec K U V)
-  | exp_rcd_nil => exp_rcd_nil
-  | exp_rcd_cons i e1 e2 => exp_rcd_cons i (open_te_rec K U e1) (open_te_rec K U e2)
-  | exp_rcd_proj e1 i => exp_rcd_proj (open_te_rec K U e1) i     
   end.
 
 Fixpoint open_ee_rec (k : nat) (f : exp) (e : exp)  {struct e} : exp :=
@@ -267,21 +207,10 @@ Fixpoint open_ee_rec (k : nat) (f : exp) (e : exp)  {struct e} : exp :=
   | exp_app e1 e2 => exp_app (open_ee_rec k f e1) (open_ee_rec k f e2)
   | exp_tabs V e1 => exp_tabs V (open_ee_rec k f e1)
   | exp_tapp e1 V => exp_tapp (open_ee_rec k f e1) V
-  | exp_rcd_nil => exp_rcd_nil
-  | exp_rcd_cons i e1 e2 => exp_rcd_cons i (open_ee_rec k f e1) (open_ee_rec k f e2)
-  | exp_rcd_proj e1 i => exp_rcd_proj (open_ee_rec k f e1) i   
   end.
 
 Definition open_te e U := open_te_rec 0 U e.
 Definition open_ee e1 e2 := open_ee_rec 0 e2 e1.
-
-
-Inductive rt_expr : exp -> Prop :=
-  | rt_expr_rcd_nil :
-      rt_expr exp_rcd_nil
-  | rt_expr_rcd_cons : forall i e1 e2,
-      rt_expr (exp_rcd_cons i e1 e2)
-.
 
 Inductive expr : exp -> Prop :=
   | expr_nat : expr exp_nat
@@ -303,34 +232,11 @@ Inductive expr : exp -> Prop :=
       expr e1 ->
       type V ->
       expr (exp_tapp e1 V)
-  | expr_rcd_nil :
-     expr exp_rcd_nil
-  | expr_rcd_cons : forall i e1 e2,
-     expr e1 ->
-     expr e2 ->
-     rt_expr e2 ->
-     expr (exp_rcd_cons i e1 e2)
-  | expr_rcd_proj : forall i e,
-     expr e ->
-     expr (exp_rcd_proj e i)
 .
 
 Definition body_e (e : exp) :=
   exists L, forall x : atom, x `notin` L -> expr (open_ee e x).
 
-Fixpoint tlookup (i':var) (Er:exp) : option exp :=
-  match Er with
-  | (exp_rcd_cons i e1 e2) =>
-      if i == i' then Some e1 else tlookup i' e2
-  | _ => None
-  end.
-
-
-Fixpoint collectLabele (e: exp) : atoms :=
-  match e with
-  | (exp_rcd_cons i e1 e2) => {{i}} \u collectLabele e2
-  | _ => {}
-  end.
 
 Inductive typing : env -> exp -> typ -> Prop :=
   | typing_nat: forall G,
@@ -354,26 +260,12 @@ Inductive typing : env -> exp -> typ -> Prop :=
       typing E (exp_tabs V e1) (typ_all V T1)
   | typing_tapp : forall T1 E e1 T T2,
       typing E e1 (typ_all T1 T2) ->
-      sub E T1 T ->
+      sub E T T1 ->
       typing E (exp_tapp e1 T) (open_tt T2 T)
   | typing_sub : forall S E e T,
       typing E e S ->
       sub E S T ->
       typing E e T
-  | typing_proj : forall G e T i Ti,
-      typing G e T ->
-      Tlookup i T = Some Ti ->
-      typing G (exp_rcd_proj e i) Ti
-  | typing_rcd_nil : forall G,
-      wf_env G ->
-      typing G exp_rcd_nil typ_rcd_nil
-  | typing_rcd_cons: forall G e1 e2 T1 T2 i,
-      typing G e1 T1 ->
-      typing G e2 T2 ->
-      rt_type T2 ->
-      rt_expr e2 ->
-      i \notin (collectLabele e2) ->
-      typing G (exp_rcd_cons i e1 e2) (typ_rcd_cons i T1 T2)
 .
 
 Inductive value : exp -> Prop :=
@@ -385,13 +277,6 @@ Inductive value : exp -> Prop :=
       value (exp_tabs T t1)
   | value_nat:
       value exp_nat
-  | value_rcd_nil:
-      value exp_rcd_nil
- | value_rcd_cons : forall i e1 e2,
-      value e1 ->
-      value e2 ->
-      rt_expr e2 ->
-      value (exp_rcd_cons i e1 e2)
 .
 
 Inductive step : exp -> exp -> Prop :=
@@ -415,23 +300,9 @@ Inductive step : exp -> exp -> Prop :=
       expr (exp_tabs T1 e1) ->
       type T2 ->
       step (exp_tapp (exp_tabs T1 e1) T2) (open_te e1 T2)
- | step_projrcd: forall e i vi ,
-     value e ->
-     tlookup i e = Some vi->
-     step (exp_rcd_proj e i) vi
- | step_proj: forall e1 e2 i,
-     step e1 e2 ->
-     step (exp_rcd_proj e1 i) (exp_rcd_proj e2 i)
- | step_rcd_head: forall e1 e2 e i,
-     step e1 e2 ->
-     step (exp_rcd_cons i e1 e) (exp_rcd_cons i e2 e)
- | step_rcd_cons: forall v1 e1 e2 i,
-     value v1 ->
-     step e1 e2 ->
-     step (exp_rcd_cons i v1 e1) (exp_rcd_cons i v1 e2)
 .
 
-Hint Constructors rt_type rt_expr type WF wf_env sub expr typing step value: core.
+Hint Constructors type WF wf_env sub expr typing step value: core.
 
 
 Fixpoint fv_te (e : exp) {struct e} : atoms :=
@@ -443,9 +314,6 @@ Fixpoint fv_te (e : exp) {struct e} : atoms :=
   | exp_app e1 e2 => (fv_te e1) `union` (fv_te e2)
   | exp_tabs V e1 => (fv_tt V) `union` (fv_te e1)
   | exp_tapp e1 V => (fv_tt V) `union` (fv_te e1)
-  | exp_rcd_nil => {}
-  | exp_rcd_cons i e1 e2 => (fv_te e1) `union` (fv_te e2)
-  | exp_rcd_proj e1 i => (fv_te e1)
   end.
 
 Fixpoint fv_ee (e : exp) {struct e} : atoms :=
@@ -457,9 +325,6 @@ Fixpoint fv_ee (e : exp) {struct e} : atoms :=
   | exp_app e1 e2 => (fv_ee e1) `union` (fv_ee e2)
   | exp_tabs V e1 => (fv_ee e1)
   | exp_tapp e1 V => (fv_ee e1)
-  | exp_rcd_nil => {}
-  | exp_rcd_cons i e1 e2 => (fv_ee e1) `union` (fv_ee e2)
-  | exp_rcd_proj e1 i => (fv_ee e1)
   end.
 
 Fixpoint subst_te (Z : atom) (U : typ) (e : exp) {struct e} : exp :=
@@ -471,9 +336,6 @@ Fixpoint subst_te (Z : atom) (U : typ) (e : exp) {struct e} : exp :=
   | exp_app e1 e2 => exp_app  (subst_te Z U e1) (subst_te Z U e2)
   | exp_tabs V e1 => exp_tabs (subst_tt Z U V)  (subst_te Z U e1)
   | exp_tapp e1 V => exp_tapp (subst_te Z U e1) (subst_tt Z U V)
-  | exp_rcd_nil => exp_rcd_nil
-  | exp_rcd_cons i e1 e2 => exp_rcd_cons i (subst_te Z U e1) (subst_te Z U e2)
-  | exp_rcd_proj e1 i => exp_rcd_proj (subst_te Z U e1) i
   end.
 
 Fixpoint subst_ee (z : atom) (u : exp) (e : exp) {struct e} : exp :=
@@ -485,9 +347,6 @@ Fixpoint subst_ee (z : atom) (u : exp) (e : exp) {struct e} : exp :=
   | exp_app e1 e2 => exp_app (subst_ee z u e1) (subst_ee z u e2)
   | exp_tabs V e1 => exp_tabs V (subst_ee z u e1)
   | exp_tapp e1 V => exp_tapp (subst_ee z u e1) V
-  | exp_rcd_nil => exp_rcd_nil
-  | exp_rcd_cons i e1 e2 => exp_rcd_cons i (subst_ee z u e1) (subst_ee z u e2)
-  | exp_rcd_proj e1 i => exp_rcd_proj (subst_ee z u e1) i
   end.
 
 Definition equiv E A B := sub E A B /\ sub E B A.
@@ -513,88 +372,6 @@ Ltac gather_atoms ::=
 (******************** Infrastructures ********************)
 (*********************************************************)
 (*********************************************************)
-
-Lemma sub_tvar_inv:forall E U (X:atom),
-    sub E X U ->
-    exists Y, U = typ_fvar Y.
-Proof with auto.
-  intros.
-  dependent induction H...
-  exists X...
-  exists X0...
-  inversion H0.
-Qed.
-
-
-
-Lemma bot_uninhabited: forall v,
-  value v -> 
-  ~ typing empty v typ_bot.
-Proof with auto.
-  intros.
-  intros C. dependent induction C;try solve [inversion H0;inv_rt];
-    try solve [inversion H;inv_rt;subst;auto]...
-  inversion H0;inv_rt;subst... inv H3.
-Qed.
-
-
-Lemma bot_uninhabited_rt: forall E v,
-  rt_expr v -> 
-  ~ typing E v typ_bot.
-Proof with auto.
-  intros.
-  intros C. dependent induction C;try solve [inversion H0;inv_rt];
-    try solve [inversion H;inv_rt;subst;auto]...
-  inversion H0;inv_rt;subst... inv H3.
-Qed.
-
-
-
-Lemma typing_collectLabel_inclusion : forall E e T,
-  typing E e T -> rt_type T -> rt_expr e ->
-  collectLabel T [<=]
-  collectLabele e.
-Proof with auto.
-  intros. induction H;inv_rt;try solve [inversion H1].
-  - (* subsumption *)
-    destruct H0.
-    + simpl. apply AtomSetProperties.subset_empty.
-    + dependent destruction H2;inv_rt.
-      { apply bot_uninhabited_rt in H... destruct H. }
-      rewrite <- IHtyping...
-  - (* nil *)
-    reflexivity.
-  - (* cons *)
-    simpl. rewrite IHtyping2... reflexivity.
-Qed.
-
-
-
-Lemma label_choose_reserve_e:
-  forall (X : atom) (u : exp) [e : exp],
-  expr e -> rt_expr e -> collectLabele e [=] collectLabele (subst_ee X u e).
-Proof with auto.
-  intros.
-  induction H;simpl;try reflexivity...
-  + inversion H0.
-  + rewrite IHexpr2... reflexivity.
-Qed.
-
-
-Lemma subst_te_collect: forall i X A e,
-    i `notin` collectLabele e ->
-    rt_expr e ->
-    expr e ->
-    i `notin` collectLabele (subst_te X A e).
-Proof with auto.
-  intros.
-  induction H1;try solve [inversion H0]...
-  simpl in *.
-  apply notin_union in H.
-  destruct H.
-  apply notin_union.
-  split...
-Qed.  
 
 
 Lemma uniq_from_wf_env : forall E,
@@ -710,14 +487,12 @@ Qed.
 Fixpoint close_tt_rec (K : nat) (Z : atom) (T : typ) {struct T} : typ :=
   match T with
   | typ_nat         => typ_nat      
-  | typ_bot         => typ_bot              
+  | typ_top         => typ_top              
   | typ_bvar J      => typ_bvar J
   | typ_fvar X      => if X == Z then typ_bvar K else typ_fvar X 
   | typ_arrow T1 T2 => typ_arrow (close_tt_rec K Z T1) (close_tt_rec K Z T2)
   | typ_all A B     => typ_all (close_tt_rec K Z A) 
                                 (close_tt_rec (S K) Z B)
-  | typ_rcd_nil => typ_rcd_nil
-  | typ_rcd_cons i A B => typ_rcd_cons i (close_tt_rec K Z A) (close_tt_rec K Z B)
   end.
 
 Definition close_tt T X := close_tt_rec 0 X T.
@@ -750,8 +525,8 @@ Qed.
 Inductive WFD :  typ -> nat -> Prop :=
 | WD_nat: forall k,
     WFD typ_nat k
-| WD_bot: forall k,
-    WFD typ_bot k
+| WD_top: forall k,
+    WFD typ_top k
 | WD_fvar: forall X k,
     WFD (typ_fvar X) k
 | WD_bvar: forall b k,
@@ -765,12 +540,6 @@ Inductive WFD :  typ -> nat -> Prop :=
     WFD A n ->
     WFD B (S n) ->
     WFD (typ_all A B) n
-| WD_nil: forall k,
-    WFD typ_rcd_nil k
-| WD_cons: forall i A B k,
-    WFD A k ->
-    WFD B k ->
-    WFD (typ_rcd_cons i A B) k
 .
 
 Hint Constructors WFC WFD WFE: core.
@@ -817,8 +586,6 @@ induction T;intros;simpl in *;try solve [f_equal;auto]...
   rewrite IHT2 with (k:=k)...
 - inv H. rewrite IHT1 with (k:=k)...
   rewrite IHT2 with (k:=S k)...
-- inv H. rewrite IHT1 with (k:=k)...
-  rewrite IHT2 with (k:=k)...
 Qed.
 
 Lemma open_close_reverse: forall T (X0 X:atom),
@@ -1023,16 +790,6 @@ Proof with auto.
 Qed.
 
 
-Lemma subst_tt_rt_type : forall Z P T,
-  rt_type T ->
-  type P ->
-  rt_type (subst_tt Z P T).
-Proof with auto.
-  intros.
-  induction H...
-  constructor...
-Qed.
-
 Lemma subst_tt_type : forall Z P T,
   type T ->
   type P ->
@@ -1045,10 +802,6 @@ Proof with auto.
   apply type_all with (L:=L \u {{Z}})...
   intros.
   rewrite subst_tt_open_tt_var...
-  {
-    (* typ_rcd_cons *)
-    constructor... apply subst_tt_rt_type...
-  }
 Qed.
 
 Lemma subst_tt_twice: forall (X Y:atom) T,
@@ -1126,14 +879,45 @@ Proof with auto.
     destruct_hypos.
     apply KeySetProperties.union_subset_3...    
     apply IHT1 with (X:=X) (n:=n)...
-    apply IHT2 with (X:=X) (n:=Datatypes.S n)...
+    apply IHT2 with (X:=X) (n:=(Datatypes.S n))...
+Qed.
+
+
+Lemma open_tt_var_rev: forall A B (X:atom),
+    X \notin fv_tt A \u fv_tt B ->
+    open_tt A X = open_tt B X ->
+    A = B.
+Proof with auto.
+  unfold open_tt.
+  generalize 0.
+  intros n A B.
+  generalize dependent n.
+  generalize dependent B.
+  induction A;induction B;intros;simpl in *;try solve [inversion H0|destruct (n0==n);subst;inversion H0]...
   -
-    apply union_subset_7 in H0.
-    apply notin_union in H.
-    destruct_hypos.
-    apply KeySetProperties.union_subset_3...    
-    apply IHT1 with (X:=X) (n:=n)...
-    apply IHT2 with (X:=X) (n:=( n))...
+    destruct (n1==n);destruct (n1==n0);subst...
+    inversion H0.
+    inversion H0.
+  -
+    destruct (n0==n);subst...
+    inversion H0.
+    rewrite <- H2 in H.
+    solve_notin_self X.
+  -
+    destruct (n0==n);subst...
+    inversion H0.
+    rewrite  H2 in H.
+    solve_notin_self X.
+  -
+    inversion H0.
+    apply IHA1 in H2...
+    apply IHA2 in H3...
+    subst...
+  -
+    inversion H0.
+    apply IHA1 in H2...
+    apply IHA2 in H3...
+    subst...
 Qed.
 
 
@@ -1205,20 +989,6 @@ Proof with auto.
   apply type_all with (L:=L)...
 Qed.
 
-
-Lemma WF_narrowing : forall V U T E F X,
-  WF (F ++ X ~ bind_sub V ++ E) T ->
-  WF (F ++ X ~ bind_sub U ++ E) T.
-Proof with eauto.
-  intros.
-  dependent induction H;try solve [analyze_binds H;eauto]...
-  -
-    apply WF_all with (L:=L)...
-    intros.
-    rewrite_alist (([(X0, bind_sub T1)] ++ F) ++ [(X, bind_sub U)] ++ E)...
-    eapply H1 with (V0:=V)...
-Qed.
-
 Lemma sub_regular : forall E A B,
     sub E A B -> wf_env E /\ WF E A /\ WF E B.
 Proof with auto.
@@ -1228,13 +998,17 @@ Proof with auto.
     repeat split...
     apply WF_var with (U:=U)...
   -
+    pick fresh Z.
+    assert ( wf_env (Z ~ bind_sub S ++ E)).
+    specialize_x_and_L Z L.
+    destruct_hypos.
+    dependent destruction H1...
+    dependent destruction H2.
     repeat split...
-    + apply WF_all with (L:=L);intros...
-      rewrite_env (nil ++ X ~ bind_sub S1 ++ E).
-      eapply WF_narrowing with (V:=S2)...
-      eapply H2...
-    + apply WF_all with (L:=L);intros...
-      eapply H2...
+    apply WF_all with (L:=L);intros...
+    eapply H1...
+    apply WF_all with (L:=L);intros...
+    eapply H1...
 Qed.
 
 
@@ -1253,23 +1027,6 @@ Proof with auto.
   -
     simpl...
 Qed.
-
-
-Lemma subst_tt_collect: forall T E i X A,
-    i `notin` collectLabel T ->
-    rt_type T ->
-    WF E T ->
-    i `notin` collectLabel (subst_tt X A T).
-Proof with auto.
-  intros.
-  induction H1;try solve [inversion H0]...
-  simpl in *.
-  apply notin_union in H.
-  destruct H.
-  apply notin_union.
-  split...
-Qed.  
-  
 
 Lemma subst_tb_wf : forall F Q E Z P T,
   WF (F ++ Z ~ Q ++ E) T ->
@@ -1295,25 +1052,6 @@ Proof with eauto.
     rewrite_env (map (subst_tb Z P) (X ~ bind_sub T1 ++ F) ++ E).
     apply H1 with (Q0:=Q)...
     apply WF_type in H2...
-  - 
-    constructor...
-    { apply subst_tt_rt_type... apply WF_type in H3... }
-    { eapply subst_tt_collect... }
-Qed.
-
-
-Lemma wf_rcd_lookup : forall E i T Ti,
-  WF E T ->
-  Tlookup i T = Some Ti ->
-  WF E Ti.
-Proof with eauto.
-  intros E i T.
-  dependent induction T; intros; try solve [inversion H0]...
-  - (* RCons *)
-    dependent destruction H.
-    simpl in *.
-    destruct (a==i)...
-    inversion H3; subst...
 Qed.
 
 
@@ -1377,14 +1115,6 @@ Proof with auto.
   -
     repeat split...
     apply sub_regular in H0. destruct_hypos...
-  -
-    repeat split...
-    apply wf_rcd_lookup with (i:=i) (T:=T)...
-  -
-    repeat split...
-    constructor...
-    rewrite typing_collectLabel_inclusion...
-    apply H0.
 Qed.
 
 
@@ -1409,37 +1139,6 @@ Proof with auto.
     apply WF_var with (U:=U)...
   -
     apply sa_all with (L:=L \u dom E \u fv_env E \u fl_env E)...
-  -
-    constructor...
-    { simpl...
-      apply KeySetProperties.FM.Subset_refl... }
-    { intros.
-      simpl in *.
-      inversion H. }
-  -
-    dependent induction H2...
-    +
-      constructor...
-      { apply KeySetProperties.FM.Subset_refl... }
-      intros.
-      simpl in *...
-      destruct (i==i0)...
-      { inversion H2.
-        inversion H4...
-        subst... }
-      { inversion H2... }
-    +
-      constructor...
-      { apply KeySetProperties.FM.Subset_refl... }
-      apply IHWF2 in H0.
-      dependent destruction H0.
-      intros.
-      simpl in *.
-      destruct (i==i1)...
-      { inversion H9.
-        inversion H10.
-        subst... }
-      { apply H8 with (i:=i1)... }
 Qed.
 
 
@@ -1469,10 +1168,8 @@ Proof with eauto using wf_env_strengthening, wf_typ_strengthening.
     analyze_binds H...
   -
     apply sa_all with (L:=L);intros...
-    rewrite_env (((X~ bind_sub S2) ++ F) ++ E)...
-    apply H2 with (x0:=x) (U0:=U)...
-  -
-    apply sa_rcd...
+    rewrite_env (((X~ bind_sub S) ++ F) ++ E)...
+    apply H1 with (x0:=x) (U0:=U)...
 Qed.
 
 
@@ -1487,12 +1184,9 @@ Proof with eauto using WF_weakening.
   -
     apply sa_all with (L:=L \u dom E1 \u dom E2 \u dom E \u fv_env (E1++E++E2) \u fl_env (E1++E++E2))...
     intros.
-    rewrite_alist (([(X, bind_sub S2)] ++ E1) ++ E ++ E2).
-    apply H2...
-    get_well_form.
-    rewrite_alist ([(X, bind_sub S2)] ++ E1 ++ E ++ E2)...
-    constructor...
-    apply WF_weakening... apply sub_regular in H. destruct_hypos...
+    rewrite_alist (([(X, bind_sub S)] ++ E1) ++ E ++ E2).
+    apply H1...
+    rewrite_alist ([(X, bind_sub S)] ++ E1 ++ E ++ E2)...
 Qed.
 
 
@@ -1583,23 +1277,8 @@ Proof with auto.
     pick fresh X.
     specialize_x_and_L X L.
     apply fv_open_tt_notin_inv in H1...
-  -
-    apply KeySetProperties.union_subset_3...
 Qed.
 
-
-
-Lemma  subst_tt_rt_expr : forall   A B X,
-    rt_expr  B ->
-    expr A  ->
-    expr B ->
-    rt_expr  (subst_ee X A B).
-Proof with auto.
-  intros.
-  induction H...
-  dependent destruction H1...
-  simpl...
-Qed.
 
 (*********************************************************)
 (*********************************************************)
@@ -1681,14 +1360,6 @@ Proof with auto.
       rewrite_env (E1 ++ Y  ~ bind_typ U ++ E2).
       apply Sub_weakening...
     }
-  - apply typing_proj with (T:=T)...
-  - apply typing_rcd_nil...
-  - simpl. apply typing_rcd_cons...
-    + apply IHtyping1...
-    + apply IHtyping2...
-    + apply subst_tt_rt_expr... apply typing_regular in H0. destruct_hypos...
-    + rewrite <- label_choose_reserve_e...
-      apply typing_regular in H0. destruct_hypos...
 Qed.
 
 
@@ -1712,11 +1383,6 @@ Proof with auto.
     + apply IHWF...
     + rewrite_alist ((map (subst_tb X Y) ((X0 ~ bind_sub T1) ++ E1)) ++ Y ~ bind_sub U ++ E2).
       rewrite  subst_tt_open_tt_var...
-  -
-    rewrite_alist (map (subst_tb X Y) E1  ++ Y ~ bind_sub U ++ E2).
-    apply WF_rcd_cons...
-    { apply subst_tt_rt_type... }
-    { apply subst_tt_collect with (E:= E1 ++ X ~ bind_sub U ++ E2)... }
 Qed.
 
 
@@ -1803,60 +1469,6 @@ Proof with auto.
 Qed.
 
 
-
-Lemma subst_tt_collect2: forall T E i X A,
-    i `in` collectLabel T ->
-    rt_type T ->
-    WF E T ->
-    i `in` collectLabel (subst_tt X A T).
-Proof with auto.
-  intros.
-  induction H1;try solve [inversion H0]...
-  simpl in *.
-  apply union_iff in H. apply union_iff.
-  destruct H...
-Qed.  
-
-
-Lemma subst_tt_collect3: forall T E i X A,
-    i `in` collectLabel (subst_tt X A T) ->
-    rt_type T ->
-    WF E T ->
-    i `in` collectLabel T.
-Proof with auto.
-  intros.
-  induction H1;try solve [inversion H0]...
-  simpl in *.
-  apply union_iff in H. apply union_iff.
-  destruct H...
-Qed.  
-
-
-Lemma Tlookup_subst: forall E A i X C T,
-    WF E A ->
-    rt_type A ->
-    Tlookup i (subst_tt X C A) = Some T ->
-    exists S,
-      Tlookup i (subst_tt X C A) = Some (subst_tt X C S) /\ (subst_tt X C S) = T
-/\ Tlookup i A = Some S.
-Proof with auto.
-  intros.
-  induction H;try solve [inversion H0]...
-  -
-    simpl in H1.
-    inversion H1.
-  -
-    simpl in *.
-    destruct (i0==i)...
-    subst.
-    inversion H1...
-    exists T1...
-Qed.
-
-
-
-
-
 Lemma sub_replacing: forall E1 E2 A B U X Y,
     sub (E1++ X ~ bind_sub U ++E2) A B ->
     X <> Y ->
@@ -1908,59 +1520,15 @@ Proof with auto.
         apply IHsub...
   -
     apply sa_all with (L:=L \u {{X}} \u dom (map (subst_tb X Y) E1 ++ (Y, bind_sub U) :: E2));intros...
-    apply IHsub1...
-    apply IHsub2...
-    rewrite_env (map (subst_tb X Y) (X0~bind_sub S2 ++ E1) ++ (Y, bind_sub U) :: E2).
+    apply WF_replacing...
+    rewrite_env (map (subst_tb X Y) (X0~bind_sub S ++ E1) ++ (Y, bind_sub U) :: E2).
     rewrite subst_tt_open_tt_var...
     rewrite subst_tt_open_tt_var...
-    apply H2...
+    apply H1...
     simpl...
     constructor...
     apply WF_replacing...
-    apply sub_regular in H. destruct_hypos...
-  - apply sa_rcd...
-    + apply subst_tt_rt_type...
-    + apply subst_tt_rt_type...
-    + intro x. intros. specialize (H2 x).
-      apply subst_tt_collect2 with (E:= E1 ++ X ~ bind_sub U ++ E2)...
-      apply H2.
-      apply subst_tt_collect3 with (E:= E1 ++ X ~ bind_sub U ++ E2) in H9...
-    + rewrite_alist (map (subst_tb X Y) E1 ++ [(Y, bind_sub U)] ++ E2).
-      apply WF_replacing...
-    + rewrite_alist (map (subst_tb X Y) E1 ++ [(Y, bind_sub U)] ++ E2).
-      apply WF_replacing...
-    + intros. 
-      apply Tlookup_subst with (E:=(E1 ++ X ~ bind_sub U ++ E2)) in H9...
-      apply Tlookup_subst with (E:=(E1 ++ X ~ bind_sub U ++ E2)) in H10...
-      destruct H9 as [t1'], H10 as [t2']. destruct_hypos. subst.
-      apply H6 with (i:=i)...
 Qed.
-
-
-Lemma lookup_some_subst: forall i A T E X B,
-    WF E A -> rt_type A ->
-    Tlookup i A = Some T->
-    Tlookup i (subst_tt X B A) = Some (subst_tt X B T).
-Proof with auto.
-  intros.
-  induction H;try solve [inversion H0]...
-  inversion H1...
-  simpl in *.
-  destruct (i0==i);subst...
-  inversion H1...
-Qed.
-
-
-
-Lemma subst_te_rt_expr:
-  forall A B X,
-  rt_expr B -> type A -> expr B -> rt_expr (subst_te X A B).
-Proof.
-  intros. induction H;simpl...
-  + constructor.
-  + constructor.
-Qed.
-
 
 
 Lemma typing_replacing2: forall E1 E2 e T U X Y,
@@ -2024,20 +1592,6 @@ Proof with auto.
     + apply sub_replacing...
   - apply typing_sub with (S:= subst_tt X Y S)...
     apply sub_replacing...
-  - simpl. apply typing_proj with (T:=subst_tt X Y T)...
-    + apply IHtyping...
-    + apply lookup_some_subst with (E:=(E1 ++ X ~ bind_sub U ++ E2))...
-      { apply typing_regular in H. destruct_hypos... }
-      { destruct T;inversion H0... }
-  - simpl. apply typing_rcd_nil...
-  - simpl. apply typing_rcd_cons...
-    + apply IHtyping1...
-    + apply IHtyping2...
-    + apply subst_tt_rt_type...
-    + apply subst_te_rt_expr... apply typing_regular in H0.
-      destruct_hypos...
-    + apply subst_te_collect...
-      apply typing_regular in H0. destruct_hypos...
 Qed.
 
 

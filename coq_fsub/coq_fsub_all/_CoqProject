@@ -7,12 +7,13 @@ Backward.v
 Variance.v
 Transitivity.v
 Equiv.v
-Antisymmetry.v
 Reverse.v
-Unfolding.v
+UnfoldingEquiv.v
 Preservation.v
 Progress.v
+Antisymmetry.v
+DecidabilityWF.v
 Decidability.v
-Fsub.v
 AlgoTyping.v
+Fsub.v
 Conservativity.v
